@@ -1,0 +1,72 @@
+[package]
+name = "colossus-core"
+version = "1.0.0-beta.1"
+description = ""
+authors = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+build = "src/build.rs"
+
+[build-dependencies]
+protobuf-codegen = "3"
+protobuf-parse = "3"
+
+[dependencies]
+
+async-recursion = {workspace = true}
+async-trait = {workspace = true}
+curve25519-dalek = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_bytes = { workspace = true }
+hex = { workspace = true }
+rand = { workspace = true }
+rand_core = {workspace = true}
+rand-utils = {workspace =  true}
+zeroize = { workspace = true }
+ed25519-dalek = { workspace = true }
+tracing = { workspace = true }
+dashmap = { workspace = true }
+paste = {workspace = true}
+tokio = { version = "1.46", features = ["sync", "time", "rt"] }
+colored = { workspace = true }
+log = { workspace = true }
+once_cell = { workspace = true }
+protobuf = { workspace = true }
+blake3 = { workspace = true }
+winter-crypto = { workspace = true }
+winter-math = { workspace = true }
+winter-utils = { workspace = true }
+thiserror  = {workspace = true}
+hashbrown = { workspace = true }
+num = { workspace = true }
+num-complex = { workspace = true }
+sha3 = { workspace = true }
+cosmian_crypto_core = { workspace = true }
+ml-kem = { workspace = true }
+tiny-keccak = { workspace = true }
+
+[dev-dependencies]
+criterion = "0.6.0"
+serial_test = "3.2.0"
+proptest = "1.7"
+proptest-derive = "0.6"
+colored = { workspace = true }
+once_cell = "1.21.3"
+ctor = "0.4"
+tokio-test = "0.4.4"
+tokio = { version = "1.46.1", features = ["rt", "sync", "time", "macros", "rt-multi-thread"] }
+mockall = "0.13"
+futures = "0.3"
+itertools = "0.14"
+rand_chacha = { version = "0.9", default-features = false }
+getrandom = { version = "0.3", default-features = false }
+bincode = "1"
+serde = { version = "1", features = ["derive"] }
+paste = { version = "1" }
+assert_matches = { version = "1.5", default-features = false }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+rand-utils = { version = "0.13", package = "winter-rand-utils" }
+rstest = { version = "0.25" }
+seq-macro = { version = "0.3" }

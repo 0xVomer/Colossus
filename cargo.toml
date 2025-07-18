@@ -1,0 +1,70 @@
+[workspace]
+members = [
+    "colossus-core",
+    "explorations/healthcare",
+
+]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0-beta.1"
+authors = ["Vomer <tarasworonjanski@gmail.com>"]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/0xVomer/Colossus/"
+
+
+[workspace.lints.rust]
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unused_import_braces = "warn"
+unused_qualifications = "warn"
+
+
+[workspace.dependencies]
+colossus-core = { path = "colossus-core" }
+
+cosmian_crypto_core = { version = "10.0.1", default-features = false, features = [
+  "ser",
+  "sha3",
+  "aes",
+  "chacha",
+  "curve25519",
+] }
+elliptic-curve = { version = "0.13.8" }
+ml-kem = { version = "0.2.1", features = ["zeroize"] }
+p256 = { version = "0.13.2" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+subtle = { version = "2.6.1" }
+tiny-keccak = { version = "2.0.2", features = ["kmac", "sha3"] }
+zeroize = "1.6.0"
+async-recursion = "1"
+async-trait = "0.1"
+dashmap = "5"
+hex = "0.4"
+log = { version = "0.4", features = ["kv_unstable"] }
+colored = { version = "3" }
+once_cell = { version = "1" }
+paste = { version = "1" }
+protobuf = { version = "3" }
+tracing = { version = "0.1.40", features = ["attributes"] }
+curve25519-dalek = { version = "4" }
+ed25519-dalek = { version = "2", features = [
+    "digest",
+    "legacy_compatibility",
+    "serde",
+] }
+blake3 = { version = "1.8", default-features = false }
+serde_bytes = { version = "0.11" }
+winter-crypto = { version = "0.13", default-features = false }
+winter-math = { version = "0.13", default-features = false }
+winter-utils = { version = "0.13", default-features = false }
+hashbrown = { version = "0.15",  features = ["serde"] }
+rand = { version = "0.9", features = ["std", "thread_rng"]  }
+rand_core = { version = "0.9" }
+rand-utils = { version = "0.13", package = "winter-rand-utils" }
+thiserror = { version = "2.0", default-features = false }
+num = { version = "0.4", default-features = false, features = ["alloc", "libm"] }
+num-complex = { version = "0.4", default-features = false }
+sha3 = { version = "0.10", default-features = false }
