@@ -12,6 +12,34 @@ The Zero-Trust Polygon Miden architecture consists of four primary layers that w
 The identity layer manages decentralized identities through Polygon ID, providing self-sovereign identity capabilities while maintaining privacy through zero-knowledge proofs. The topmost application layer enables developers and users to interact with the system through privacy-preserving applications that leverage the underlying security infrastructure.
 
 This layered approach ensures that security is not an afterthought but is embedded at every level of the system. The architecture specifically takes advantage of Polygon Miden's client-side proving to enable users to generate proofs locally while maintaining complete privacy over their transaction data. The integration of CP-ABE allows for fine-grained access control policies to be cryptographically enforced, while UCAN tokens provide delegatable capabilities that implement the principle of least privilege.
+```mermaid
+C4Context
+    title Zero-Trust Polygon Miden Architecture - System Context
+
+    Person(trader, "Institutional Trader", "Executes large-value trades with privacy")
+    Person(authority, "Attribute Authority", "Manages CP-ABE policies and user attributes")
+    Person(validator, "Network Validator", "Validates ZK proofs and maintains consensus")
+
+    System_Boundary(miden_system, "Polygon Miden Zero-Trust System") {
+        System(miden_core, "Miden VM Core", "Client-side proving and private execution")
+        System(cpabe_layer, "CP-ABE Security Layer", "Covercrypt-based access control")
+        System(ucan_layer, "UCAN Capability Layer", "Delegatable authorization tokens")
+        System(did_layer, "DID Identity Layer", "Polygon ID integration")
+        System(zt_engine, "Zero-Trust Engine", "Continuous verification and risk assessment")
+    }
+
+    System_Ext(polygon_id, "Polygon ID", "Decentralized identity verification")
+    System_Ext(ipfs, "IPFS Network", "Distributed credential storage")
+    System_Ext(defi_protocol, "DeFi Protocol", "Trading execution venue")
+
+    Rel(trader, miden_core, "Submits encrypted transactions")
+    Rel(trader, did_layer, "Authenticates via DID")
+    Rel(authority, cpabe_layer, "Issues CP-ABE keys")
+    Rel(miden_core, defi_protocol, "Executes validated trades")
+    Rel(did_layer, polygon_id, "Verifies credentials")
+    Rel(validator, miden_core, "Validates ZK proofs")
+    Rel(cpabe_layer, ipfs, "Stores encrypted policies")
+```
 
 ## Core Components Integration
 
@@ -79,11 +107,108 @@ The client-side proving capabilities of Polygon Miden enable users to generate p
 ## Use Case: Institutional DeFi Trading
 
 To demonstrate the practical application of the Zero-Trust Polygon Miden architecture, we present a detailed use case involving institutional DeFi trading. This scenario showcases how the integrated security framework handles high-value, privacy-sensitive transactions while maintaining full compliance and auditability.
+
 ### Scenario Overview
 
 An institutional trader needs to execute a large trade (10 million USDC) through a DeFi protocol while maintaining transaction privacy, ensuring compliance with regulatory requirements, and providing full audit trails for internal and external oversight. The trade must be executed without revealing sensitive information about the institution's trading strategy or positions while still providing sufficient transparency for regulatory compliance.
 
 ### End-to-End Transaction Flow
+```mermaid
+sequenceDiagram
+    participant T as Institutional Trader
+    participant ZT as Zero-Trust Engine
+    participant DID as DID Manager
+    participant UCAN as UCAN Manager
+    participant CPABE as CP-ABE Manager
+    participant MVM as Miden VM
+    participant NET as Miden Network
+    participant DEFI as DeFi Protocol
+
+    Note over T,DEFI: Institutional Trading Transaction Flow
+
+    %% Identity Verification Phase
+    rect rgb(230, 245, 254)
+        Note right of T: Identity Verification
+        T->>+DID: Present DID + Credentials
+        DID->>DID: Verify credential signatures
+        DID->>+ZT: Identity verification result
+        ZT->>ZT: Calculate identity risk score
+        ZT-->>-DID: Risk assessment complete
+        DID-->>-T: Identity verified
+    end
+
+    %% Capability Check Phase
+    rect rgb(243, 229, 245)
+        Note right of T: Capability Authorization
+        T->>+UCAN: Present capability tokens
+        UCAN->>UCAN: Validate token chain
+        UCAN->>UCAN: Check delegation permissions
+        UCAN->>+ZT: Capability verification
+        ZT->>ZT: Assess capability risk
+        ZT-->>-UCAN: Authorization decision
+        UCAN-->>-T: Capabilities validated
+    end
+
+    %% Attribute-Based Access Control
+    rect rgb(232, 245, 232)
+        Note right of T: CP-ABE Access Control
+        T->>+CPABE: Request transaction encryption
+        CPABE->>CPABE: Check user attributes
+        CPABE->>CPABE: Validate policy compliance
+        CPABE->>+ZT: Attribute verification
+        ZT->>ZT: Calculate attribute risk
+        ZT-->>-CPABE: Policy enforcement decision
+        CPABE->>CPABE: Encrypt transaction data
+        CPABE-->>-T: Encrypted transaction
+    end
+
+    %% Zero-Trust Continuous Assessment
+    rect rgb(255, 243, 224)
+        Note right of T: Zero-Trust Assessment
+        ZT->>ZT: Aggregate all risk factors
+        ZT->>ZT: Device security assessment
+        ZT->>ZT: Behavioral analysis
+        ZT->>ZT: Geolocation verification
+        ZT->>ZT: Calculate final risk score
+
+        alt Risk Score Acceptable
+            ZT->>T: Transaction approved
+        else Risk Score Too High
+            ZT->>T: Additional verification required
+            T->>ZT: Provide additional proof
+            ZT->>ZT: Re-evaluate risk
+            ZT->>T: Transaction approved/denied
+        end
+    end
+
+    %% Miden Execution Phase
+    rect rgb(252, 228, 236)
+        Note right of T: Miden VM Execution
+        T->>+MVM: Submit encrypted transaction
+        MVM->>MVM: Generate ZK-STARK proof
+        MVM->>MVM: Verify proof locally
+        MVM->>MVM: Execute private computation
+        MVM-->>-T: Proof generated
+
+        T->>+NET: Submit proof to network
+        NET->>NET: Verify ZK-STARK proof
+        NET->>NET: Update account states
+        NET->>+DEFI: Execute trade order
+        DEFI->>DEFI: Process institutional trade
+        DEFI-->>-NET: Trade executed
+        NET-->>-T: Transaction confirmed
+    end
+
+    %% Audit and Logging
+    rect rgb(245, 245, 245)
+        Note right of T: Audit Trail
+        NET->>NET: Log transaction hash
+        ZT->>NET: Log risk assessment
+        DID->>NET: Log identity verification
+        UCAN->>NET: Log capability usage
+        CPABE->>NET: Log policy enforcement
+    end
+```
 
 The transaction flow demonstrates the seamless integration of all security components within the Zero-Trust framework. The process begins with identity verification through Polygon ID, where the institutional trader presents their DID and associated credentials. The system verifies the trader's institutional status and KYC compliance without exposing sensitive identity information.
 The Zero-Trust policy engine evaluates the trade request based on multiple risk factors, including trade size, timing, historical behavior patterns, and current market conditions. The risk assessment considers the institutional nature of the trader, their compliance history, and the specific characteristics of the requested trade, resulting in a risk score that determines whether additional security measures are required.
@@ -92,11 +217,198 @@ Following successful risk assessment, the system initiates CP-ABE access control
 
 ### Capability Delegation and Execution
 
+```mermaid
+graph TD
+    subgraph "Attribute Authority Infrastructure"
+        AA[Attribute Authority<br/>Master Key Holder]
+        MSK[Master Secret Key<br/>HSM Protected]
+        MPK[Master Public Key<br/>Publicly Available]
+        POL[Policy Definition<br/>Institutional Trading Rules]
+    end
+
+    subgraph "User Attribute Management"
+        USER[Institutional Trader]
+        ATTR[User Attributes<br/>Role, Institution, Clearance]
+        USK[User Secret Key<br/>Derived from Attributes]
+        CRED[Verifiable Credentials<br/>Polygon ID Based]
+    end
+
+    subgraph "Data Encryption Process"
+        DATA[Trading Data<br/>Transaction Details]
+        POLICY[Access Policy<br/>Boolean Expression]
+        ENC[Encrypted Data<br/>Covercrypt Ciphertext]
+        SYM[Symmetric Key<br/>AES-256-GCM]
+    end
+
+    subgraph "Decryption Process"
+        DEC_REQ[Decryption Request]
+        ATTR_CHECK[Attribute Verification]
+        KEY_MATCH[Policy Matching]
+        PLAIN[Decrypted Data]
+    end
+
+    subgraph "Zero-Trust Integration"
+        ZT_POL[Zero-Trust Policies]
+        RISK[Risk Assessment]
+        CONT_VER[Continuous Verification]
+        ACCESS_DEC[Access Decision]
+    end
+
+    %% Key Generation Flow
+    AA --> MSK
+    AA --> MPK
+    AA --> POL
+
+    %% User Key Derivation
+    MSK --> USK
+    ATTR --> USK
+    USER --> ATTR
+    USER --> CRED
+    CRED --> ATTR
+
+    %% Encryption Flow
+    DATA --> ENC
+    POLICY --> ENC
+    MPK --> ENC
+    ENC --> SYM
+
+    %% Decryption Flow
+    USER --> DEC_REQ
+    DEC_REQ --> ATTR_CHECK
+    USK --> ATTR_CHECK
+    ATTR_CHECK --> KEY_MATCH
+    KEY_MATCH --> PLAIN
+    ENC --> PLAIN
+
+    %% Zero-Trust Integration
+    ATTR_CHECK --> ZT_POL
+    ZT_POL --> RISK
+    RISK --> CONT_VER
+    CONT_VER --> ACCESS_DEC
+    ACCESS_DEC --> KEY_MATCH
+
+    %% Policy Updates
+    POL --> POLICY
+    AA --> POL
+    ZT_POL --> POL
+
+    %% Styling
+    classDef authority fill:#ffcdd2
+    classDef user fill:#c8e6c9
+    classDef encryption fill:#fff9c4
+    classDef zerotrust fill:#e1bee7
+    classDef process fill:#b3e5fc
+
+    class AA,MSK,MPK,POL authority
+    class USER,ATTR,USK,CRED user
+    class DATA,POLICY,ENC,SYM encryption
+    class ZT_POL,RISK,CONT_VER,ACCESS_DEC zerotrust
+    class DEC_REQ,ATTR_CHECK,KEY_MATCH,PLAIN process
+```
+
 The UCAN capability system issues tokens that provide specific permissions for large trade execution. These tokens are time-limited and scoped to the specific transaction requirements, implementing the principle of least privilege while enabling the necessary trading functionality. The capability tokens are cryptographically verifiable and can be audited to ensure proper authorization.
 
 The Miden VM performs client-side proof generation, creating zero-knowledge proofs that demonstrate the validity of the trade without revealing sensitive details about the trading strategy, position sizes, or timing. This approach ensures that the institutional trader maintains complete privacy over their trading activities while still providing cryptographic proof of compliance and validity.
 
 The DeFi protocol receives the encrypted trade data along with the zero-knowledge proofs, verifying the proofs and executing the trade on the Miden blockchain. The execution maintains privacy through the use of private accounts and encrypted transaction data, while still providing sufficient information for proper settlement and risk management.
+
+
+```mermaid
+graph TB
+    subgraph "Root Authority"
+        ROOT[Root Authority<br/>did:key:root]
+        ROOT_CAP[Root Capabilities<br/>All Trading Permissions]
+    end
+
+    subgraph "Institution Level"
+        INST[Institution Authority<br/>did:key:institution]
+        INST_CAP[Institution Capabilities<br/>Large Trade Execution<br/>Risk Management<br/>Compliance Reporting]
+        INST_TOKEN[UCAN Token 1<br/>iss: root<br/>aud: institution<br/>exp: 1 year]
+    end
+
+    subgraph "Department Level"
+        DEPT[Trading Department<br/>did:key:trading-dept]
+        DEPT_CAP[Department Capabilities<br/>Trade Execution<br/>Position Management]
+        DEPT_TOKEN[UCAN Token 2<br/>iss: institution<br/>aud: trading-dept<br/>exp: 6 months]
+    end
+
+    subgraph "Senior Trader Level"
+        SENIOR[Senior Trader<br/>did:key:senior-trader]
+        SENIOR_CAP[Senior Capabilities<br/>Execute Trades<br/>Delegate Permissions<br/>View Reports]
+        SENIOR_TOKEN[UCAN Token 3<br/>iss: trading-dept<br/>aud: senior-trader<br/>exp: 3 months]
+    end
+
+    subgraph "Junior Trader Level"
+        JUNIOR[Junior Trader<br/>did:key:junior-trader]
+        JUNIOR_CAP[Limited Capabilities<br/>Execute Small Trades<br/>View Positions]
+        JUNIOR_TOKEN[UCAN Token 4<br/>iss: senior-trader<br/>aud: junior-trader<br/>exp: 1 month]
+    end
+
+    subgraph "Capability Constraints"
+        TIME[Time Constraints<br/>Working Hours Only]
+        SIZE[Trade Size Limits<br/>Max $1M per trade]
+        GEO[Geographic Limits<br/>Specific Regions]
+        RISK[Risk Limits<br/>VaR Constraints]
+    end
+
+    subgraph "Zero-Trust Verification"
+        VERIFY[Token Verification<br/>Signature Check<br/>Chain Validation]
+        ASSESS[Risk Assessment<br/>Behavioral Analysis<br/>Device Security]
+        ENFORCE[Policy Enforcement<br/>Real-time Decisions]
+    end
+
+    %% Delegation Chain
+    ROOT --> ROOT_CAP
+    ROOT_CAP --> INST_TOKEN
+    INST_TOKEN --> INST
+    INST --> INST_CAP
+    INST_CAP --> DEPT_TOKEN
+    DEPT_TOKEN --> DEPT
+    DEPT --> DEPT_CAP
+    DEPT_CAP --> SENIOR_TOKEN
+    SENIOR_TOKEN --> SENIOR
+    SENIOR --> SENIOR_CAP
+    SENIOR_CAP --> JUNIOR_TOKEN
+    JUNIOR_TOKEN --> JUNIOR
+    JUNIOR --> JUNIOR_CAP
+
+    %% Constraints Application
+    JUNIOR_CAP --> TIME
+    JUNIOR_CAP --> SIZE
+    JUNIOR_CAP --> GEO
+    JUNIOR_CAP --> RISK
+
+    %% Zero-Trust Integration
+    JUNIOR_TOKEN --> VERIFY
+    SENIOR_TOKEN --> VERIFY
+    DEPT_TOKEN --> VERIFY
+    INST_TOKEN --> VERIFY
+
+    VERIFY --> ASSESS
+    ASSESS --> ENFORCE
+    ENFORCE --> JUNIOR_CAP
+
+    %% Revocation paths (dotted lines)
+    ROOT -.-> INST_TOKEN
+    INST -.-> DEPT_TOKEN
+    DEPT -.-> SENIOR_TOKEN
+    SENIOR -.-> JUNIOR_TOKEN
+
+    %% Styling
+    classDef authority fill:#f8bbd9
+    classDef institution fill:#b39ddb
+    classDef department fill:#81c784
+    classDef trader fill:#ffb74d
+    classDef constraint fill:#ffcdd2
+    classDef zerotrust fill:#90caf9
+
+    class ROOT,ROOT_CAP authority
+    class INST,INST_CAP,INST_TOKEN institution
+    class DEPT,DEPT_CAP,DEPT_TOKEN department
+    class SENIOR,SENIOR_CAP,SENIOR_TOKEN,JUNIOR,JUNIOR_CAP,JUNIOR_TOKEN trader
+    class TIME,SIZE,GEO,RISK constraint
+    class VERIFY,ASSESS,ENFORCE zerotrust
+```
 
 ### Compliance and Audit Trail
 
@@ -119,6 +431,82 @@ The architecture enables true privacy-preserving operations through the integrat
 
 The client-side proving capabilities of Polygon Miden ensure that users maintain complete control over their private data while still enabling comprehensive verification and audit capabilities. This approach addresses the fundamental tension between privacy and transparency that has limited blockchain adoption in privacy-sensitive industries.
 
+
+```mermaid
+flowchart TD
+    START([Institutional Trader<br/>Initiates Transaction])
+
+    subgraph "Client-Side Preparation"
+        PREP[Prepare Transaction Data<br/>• Trade amount: $10M<br/>• Institution ID<br/>• Compliance score]
+        PROG[Load Miden Program<br/>• Institutional trading rules<br/>• Compliance checks<br/>• Fee calculations]
+        INPUT[Create Program Inputs<br/>• Stack inputs<br/>• Advice inputs<br/>• Memory inputs]
+    end
+
+    subgraph "Local Proof Generation"
+        EXEC[Execute Miden Program<br/>• Verify trade parameters<br/>• Check compliance thresholds<br/>• Calculate fees]
+        TRACE[Generate Execution Trace<br/>• All intermediate states<br/>• Memory operations<br/>• Stack operations]
+        PROOF[Generate ZK-STARK Proof<br/>• Proves correct execution<br/>• No trusted setup<br/>• Post-quantum secure]
+    end
+
+    subgraph "Privacy Preservation"
+        PRIVATE[Private Data Remains Local<br/>• Trading strategy<br/>• Position sizes<br/>• Counterparty details]
+        PUBLIC[Public Outputs Only<br/>• Proof validity<br/>• Compliance confirmation<br/>• Fee amount]
+    end
+
+    subgraph "Network Submission"
+        SUBMIT[Submit to Miden Network<br/>• ZK-STARK proof<br/>• Public inputs<br/>• Program hash]
+        VERIFY[Network Verification<br/>• Proof validity check<br/>• Program authenticity<br/>• Input constraints]
+
+        VALID{Proof Valid?}
+        ACCEPT[Accept Transaction<br/>• Update account state<br/>• Execute trade<br/>• Record audit log]
+        REJECT[Reject Transaction<br/>• No state change<br/>• Return error<br/>• Log attempt]
+    end
+
+    subgraph "Integration with Zero-Trust"
+        ZT_CHECK[Zero-Trust Verification<br/>• Identity confirmation<br/>• Capability validation<br/>• Risk assessment]
+        CPABE_CHECK[CP-ABE Access Control<br/>• Attribute verification<br/>• Policy compliance<br/>• Data decryption]
+    end
+
+    START --> PREP
+    PREP --> PROG
+    PROG --> INPUT
+    INPUT --> EXEC
+    EXEC --> TRACE
+    TRACE --> PROOF
+    PROOF --> PRIVATE
+    PRIVATE --> PUBLIC
+    PUBLIC --> SUBMIT
+    SUBMIT --> ZT_CHECK
+    ZT_CHECK --> CPABE_CHECK
+    CPABE_CHECK --> VERIFY
+    VERIFY --> VALID
+    VALID -->|Yes| ACCEPT
+    VALID -->|No| REJECT
+
+    ACCEPT --> END([Transaction Complete<br/>Privacy Preserved])
+    REJECT --> END_FAIL([Transaction Failed<br/>No Information Leaked])
+
+    %% Styling
+    classDef client fill:#e3f2fd
+    classDef proof fill:#f3e5f5
+    classDef privacy fill:#e8f5e8
+    classDef network fill:#fff3e0
+    classDef security fill:#fce4ec
+    classDef decision fill:#ffebee
+    classDef success fill:#e8f5e8
+    classDef failure fill:#ffebee
+
+    class PREP,PROG,INPUT client
+    class EXEC,TRACE,PROOF proof
+    class PRIVATE,PUBLIC privacy
+    class SUBMIT,VERIFY network
+    class ZT_CHECK,CPABE_CHECK security
+    class VALID decision
+    class ACCEPT,END success
+    class REJECT,END_FAIL failure
+```
+
+
 ### Scalability and Performance
 
 The architecture leverages Polygon Miden's client-side proving to achieve superior scalability compared to traditional blockchain systems. By moving computation to the client side, the system reduces the burden on network infrastructure while enabling parallel processing and improved throughput.
@@ -130,6 +518,119 @@ The capability-based security model reduces the overhead associated with traditi
 The comprehensive audit capabilities and privacy-preserving design make the architecture well-suited for regulatory compliance in various industries. The system can provide regulators with complete transparency into activities while maintaining user privacy, addressing the compliance challenges that have limited blockchain adoption in regulated industries.
 
 The immutable audit logs and verifiable compliance proofs ensure that organizations can demonstrate regulatory compliance without compromising competitive advantages or sensitive information. This capability is particularly important for financial services, healthcare, and other regulated industries.
+
+```mermaid
+graph LR
+    subgraph "Risk Factors"
+        I[Identity Verification<br/>Weight: 25%]
+        D[Device Security<br/>Weight: 20%]
+        B[Behavioral Analysis<br/>Weight: 15%]
+        L[Location Verification<br/>Weight: 15%]
+        R[Resource Sensitivity<br/>Weight: 15%]
+        T[Threat Intelligence<br/>Weight: 10%]
+    end
+
+    subgraph "Identity Assessment"
+        I1[DID Verification<br/>Signature Valid]
+        I2[Credential Freshness<br/>Not Expired]
+        I3[MFA Status<br/>Recent Authentication]
+        I4[Account Standing<br/>No Violations]
+    end
+
+    subgraph "Device Assessment"
+        D1[OS Patch Level<br/>Up to Date]
+        D2[Security Software<br/>Active Protection]
+        D3[Hardware Security<br/>TPM/Secure Enclave]
+        D4[Network Security<br/>VPN/Secure Connection]
+    end
+
+    subgraph "Behavioral Assessment"
+        B1[Historical Patterns<br/>Normal Trading Hours]
+        B2[Transaction Patterns<br/>Typical Amounts]
+        B3[Access Patterns<br/>Known Locations]
+        B4[Anomaly Detection<br/>Unusual Behavior]
+    end
+
+    subgraph "Risk Calculation"
+        CALC[Risk Score Calculator<br/>Weighted Average]
+        SCORE{Risk Score<br/>Assessment}
+
+        LOW[Low Risk<br/>Score ≥ 0.8<br/>✅ Allow]
+        MED[Medium Risk<br/>0.5 ≤ Score < 0.8<br/>⚠️ Additional Verification]
+        HIGH[High Risk<br/>Score < 0.5<br/>❌ Deny/Challenge]
+    end
+
+    subgraph "Policy Enforcement"
+        ALLOW[Grant Access<br/>• Full capabilities<br/>• Standard monitoring<br/>• Normal audit level]
+
+        CHALLENGE[Request Additional Proof<br/>• Secondary authentication<br/>• Manager approval<br/>• Enhanced monitoring]
+
+        DENY[Block Access<br/>• Log attempt<br/>• Alert security team<br/>• Require admin review]
+    end
+
+    %% Risk factor connections
+    I --> I1
+    I --> I2
+    I --> I3
+    I --> I4
+
+    D --> D1
+    D --> D2
+    D --> D3
+    D --> D4
+
+    B --> B1
+    B --> B2
+    B --> B3
+    B --> B4
+
+    %% Calculation flow
+    I1 --> CALC
+    I2 --> CALC
+    I3 --> CALC
+    I4 --> CALC
+    D1 --> CALC
+    D2 --> CALC
+    D3 --> CALC
+    D4 --> CALC
+    B1 --> CALC
+    B2 --> CALC
+    B3 --> CALC
+    B4 --> CALC
+    L --> CALC
+    R --> CALC
+    T --> CALC
+
+    CALC --> SCORE
+    SCORE -->|≥ 0.8| LOW
+    SCORE -->|0.5-0.8| MED
+    SCORE -->|< 0.5| HIGH
+
+    LOW --> ALLOW
+    MED --> CHALLENGE
+    HIGH --> DENY
+
+    %% Styling
+    classDef risk fill:#ffecb3
+    classDef identity fill:#c8e6c9
+    classDef device fill:#b3e5fc
+    classDef behavior fill:#f8bbd9
+    classDef calculation fill:#d1c4e9
+    classDef lowrisk fill:#c8e6c9
+    classDef medrisk fill:#ffe0b2
+    classDef highrisk fill:#ffcdd2
+    classDef policy fill:#e1bee7
+
+    class I,D,B,L,R,T risk
+    class I1,I2,I3,I4 identity
+    class D1,D2,D3,D4 device
+    class B1,B2,B3,B4 behavior
+    class CALC,SCORE calculation
+    class LOW,ALLOW lowrisk
+    class MED,CHALLENGE medrisk
+    class HIGH,DENY highrisk
+```
+
 
 ## Implementation Considerations
 

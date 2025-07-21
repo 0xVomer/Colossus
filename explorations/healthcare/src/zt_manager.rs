@@ -600,7 +600,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_zero_trust_evaluation() {
-        let manager = ZeroTrustManager::new();
+        let mut manager = ZeroTrustManager::new();
 
         let request = AccessRequest {
             id: Uuid::new_v4(),
