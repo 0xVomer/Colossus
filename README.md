@@ -1,4 +1,4 @@
-![](./assets/colossus.jpeg)
+![](./assets/colossus.jpg)
 
 
 # Colossus
