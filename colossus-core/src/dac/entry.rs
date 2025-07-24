@@ -1,26 +1,10 @@
-//! #[Entry]
-//!
-//! - A Vector of [Attribute] entries, a hierarchy starts with Root Issuer entry/entries
-//! - can be extended up to `k_prime` if `update_key` is provided
-//! - proving [Entry] [Attribute]s can be restricted by zeroizing opening information
-//! - each [Entry] can hold up to a total of `MaxCardinality` attributes
-//! - There can be up to `message_l` entries in each [Entry] vector
-//! - Each entry in [Entry] is a vector holding a number of Attributes
-//! - You can select subsets of AttributesVectors, by indicating which indexes you want to select, a 2D vector matix
-//! - When opening information is zeroized, then the corresponding entry in [Entry] cannot be selected,
-//! thus opening and atrributes have a relationship with each other. The opening vector is held in the credential,
-//! ths the credential and the attributes have a relationship with each other.
-//!
-use crate::attributes::Attribute;
-use crate::config::DEFAULT_MAX_ENTRIES;
-use crate::error;
-use bls12_381_plus::Scalar;
-use bls12_381_plus::elliptic_curve::bigint;
+use super::{Attribute, DEFAULT_MAX_ENTRIES, error::Error};
+use bls12_381_plus::{Scalar, elliptic_curve::bigint};
+use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
 /// Entry is a vector of Attributes
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Entry(pub Vec<Attribute>);
 
 impl Entry {
@@ -59,18 +43,18 @@ impl From<Vec<Attribute>> for Entry {
     }
 }
 
-/// Try from an arbitrary vector of bytes
-impl TryFrom<Vec<Vec<u8>>> for Entry {
-    type Error = error::Error;
+// /// Try from an arbitrary vector of bytes
+// impl TryFrom<Vec<Vec<u8>>> for Entry {
+//     type Error = Error;
 
-    fn try_from(bytes: Vec<Vec<u8>>) -> Result<Self, Self::Error> {
-        let attributes = bytes
-            .into_iter()
-            .map(|attr| Attribute::try_from(attr))
-            .collect::<Result<Vec<Attribute>, error::Error>>()?;
-        Ok(Entry::new(&attributes))
-    }
-}
+//     fn try_from(bytes: Vec<Vec<u8>>) -> Result<Self, Self::Error> {
+//         let attributes = bytes
+//             .into_iter()
+//             .map(|attr| Attribute::try_from(attr))
+//             .collect::<Result<Vec<Attribute>, Error>>()?;
+//         Ok(Entry::new(&attributes))
+//     }
+// }
 
 /// [Entry] from a slice of [Attribute]s
 impl From<&[Attribute]> for Entry {
@@ -90,8 +74,7 @@ pub fn entry_to_scalar(input: &Entry) -> Vec<Scalar> {
 /// Max number of entries in a credential.
 ///
 /// Defaults to [DEFAULT_MAX_ENTRIES] (6)
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MaxEntries(pub usize);
 
 impl From<usize> for MaxEntries {
@@ -157,7 +140,7 @@ mod test {
 
     #[test]
     fn test_convert_entry_to_big() {
-        let entry = Entry::new(&[Attribute::new("test")]);
+        let entry = Entry::new(&[Attribute::from(("DPT", "FIN"))]);
         let scalars = entry_to_scalar(&entry);
         assert_eq!(scalars.len(), 1);
     }

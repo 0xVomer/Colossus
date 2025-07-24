@@ -1,10 +1,7 @@
-//! Port of <https://docs.rs/amcl_wrapper/latest/amcl_wrapper/univar_poly/struct.UnivarPolynomial.html>
-//! We only need to coeffients from roots, much of this code is not used or needed.
-//!
-#![allow(clippy::vec_init_then_push)] // because macro usage
+#![allow(clippy::vec_init_then_push)]
 use super::Scalar;
 use bls12_381_plus::ff::Field;
-use rand::rngs::ThreadRng;
+use cosmian_crypto_core::reexport::rand_core::OsRng;
 use rayon::prelude::*;
 use std::{
     ops::{Index, IndexMut, Mul},
@@ -158,7 +155,7 @@ impl ScalarVector {
     pub fn random(size: usize) -> Self {
         (0..size)
             .into_par_iter()
-            .map(|_| Scalar::random(ThreadRng::default()))
+            .map(|_| Scalar::random(OsRng::default()))
             .collect::<Vec<Scalar>>()
             .into()
     }

@@ -23,7 +23,8 @@ unused_qualifications = "warn"
 
 [workspace.dependencies]
 colossus-core = { path = "colossus-core" }
-
+secrecy = "0.10.0"
+rayon = "1.10.0"
 cid = { version = "0.11.1", features = ["serde"] }
 cosmian_crypto_core = { version = "10.0.1", default-features = false, features = [
   "ser",

@@ -1,9 +1,9 @@
 extern crate alloc;
 extern crate rand;
-
 pub mod access_control;
 mod akd;
 mod configuration;
+pub mod dac;
 pub mod directory;
 pub mod policy;
 pub mod proto;

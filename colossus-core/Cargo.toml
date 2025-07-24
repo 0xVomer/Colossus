@@ -13,6 +13,7 @@ protobuf-codegen = "3"
 protobuf-parse = "3"
 
 [dependencies]
+secrecy = {workspace = true}
 bls12_381_plus  = { workspace = true }
 cid = { workspace = true }
 async-recursion = {workspace = true}
@@ -47,6 +48,7 @@ sha3 = { workspace = true }
 cosmian_crypto_core = { workspace = true }
 ml-kem = { workspace = true }
 tiny-keccak = { workspace = true }
+rayon = { workspace = true }
 
 [dev-dependencies]
 criterion = "0.6.0"

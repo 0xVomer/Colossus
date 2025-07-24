@@ -17,10 +17,9 @@ pub enum Error {
     #[error("Failed to use their Verification Key(expected {expected:?}, found {found:?})")]
     InvalidVerificationKey { expected: String, found: String },
 
-    /// IssuerError
-    #[error("IssuerError: {0}")]
-    IssuerError(#[from] crate::keypair::IssuerError),
-
+    // /// IssuerError
+    // #[error("IssuerError: {0}")]
+    // IssuerError(#[from] crate::keypair::IssuerError),
     /// Proof is not valid, did not pass verify_proof function
     #[error("Proof is not valid, did not pass verify_proof function")]
     InvalidProof,

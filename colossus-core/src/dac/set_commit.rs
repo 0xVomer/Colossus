@@ -1,19 +1,29 @@
-use crate::ec::curve::{Gt, pairing, polynomial_from_roots};
-use crate::ec::univarpoly::UnivarPolynomial;
-use crate::ec::{G1Projective, G2Projective, Scalar};
-use crate::entry::Entry;
-use crate::entry::entry_to_scalar;
-use crate::error;
-use crate::keypair::MaxCardinality;
+use super::{
+    ec::{
+        G1Projective, G2Projective, Scalar,
+        curve::{Gt, pairing, polynomial_from_roots},
+        univarpoly::UnivarPolynomial,
+    },
+    entry::{Entry, entry_to_scalar},
+    error,
+    keypair::MaxCardinality,
+};
 use bls12_381_plus::elliptic_curve::bigint;
 use bls12_381_plus::elliptic_curve::ops::MulByGenerator;
 use bls12_381_plus::ff::Field;
 use bls12_381_plus::group::{Curve, Group};
 use bls12_381_plus::{G1Affine, G2Affine};
-use rand::rngs::ThreadRng;
+use cosmian_crypto_core::reexport::rand_core::OsRng;
+//use rand::rngs::ThreadRng;
 use secrecy::ExposeSecret;
-use secrecy::Secret;
-use sha2::{Digest, Sha256};
+use secrecy::SecretBox;
+use serde::{Deserialize, Serialize};
+use tiny_keccak::{Hasher, Sha3};
+
+use cosmian_crypto_core::{
+    CsRng,
+    reexport::rand_core::{CryptoRngCore, SeedableRng},
+};
 
 /// Public Parameters of the Set Commitment
 /// - `pp_commit_g1`: Root Issuer's public parameters commitment for G1
@@ -40,8 +50,7 @@ pub struct ParamSetCommitment {
 /// | 48      | 96      | 8               | 1296                         |
 /// | 48      | 96      | 10              | 1584                         |
 /// | 48      | 96      | 12              | 1872                         |
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ParamSetCommitmentCompressed {
     pub pp_commit_g1: Vec<Vec<u8>>,
     pub pp_commit_g2: Vec<Vec<u8>>,
@@ -111,7 +120,6 @@ impl std::convert::TryFrom<ParamSetCommitmentCompressed> for ParamSetCommitment 
 }
 
 /// ToString for ParamSetCommitmentCompressed
-#[cfg(feature = "serde_json")]
 impl ToString for ParamSetCommitmentCompressed {
     fn to_string(&self) -> String {
         serde_json::to_string(self).expect("compressed should be well formed")
@@ -134,7 +142,8 @@ impl ParamSetCommitment {
     /// # Returns
     /// ParamSetCommitment
     pub fn new(t: &usize) -> ParamSetCommitment {
-        let base: Secret<Scalar> = Secret::new(Scalar::random(ThreadRng::default())); // security parameter λ
+        let rng = CsRng::from_entropy();
+        let base: SecretBox<Scalar> = SecretBox::new(Box::new(Scalar::random(rng))); // security parameter λ
 
         // pp_commit_g1 and pp_commit_g2 are vectors of G1 and G2 elements respectively.
         // They are used to compute the commitment and witness.
@@ -193,7 +202,7 @@ pub trait Commitment {
         let pre_commit = generate_pre_commit(monypol_coeff, param_sc);
 
         // randomness Rho (ρ)
-        let open_info = Scalar::random(ThreadRng::default());
+        let open_info = Scalar::random(OsRng::default());
 
         // multiply pre_commit by rho (open_info = rho). Rho is a random element in Zp. Zp is the set of integers modulo p.
         let commitment = pre_commit * open_info;
@@ -485,7 +494,11 @@ impl CrossSetCommitment {
 
 fn hash_to_scalar(commit: &G1Projective) -> Scalar {
     // Note the choice of compressed vs uncompressed bytes is arbitrary.
-    let chash = Sha256::digest(commit.to_affine().to_uncompressed().as_ref());
+    let mut hasher = Sha3::v256();
+    let mut chash = [0u8; 32];
+
+    hasher.update(commit.to_affine().to_uncompressed().as_ref());
+    hasher.finalize(&mut chash);
     bigint::U256::from_be_slice(&chash).into()
 }
 
@@ -514,75 +527,9 @@ pub fn not_intersection(list_s: &[Scalar], list_t: Vec<Scalar>) -> Vec<Scalar> {
         .collect::<Vec<Scalar>>()
 }
 
-#[cfg(target_arch = "wasm32")]
-/// This function gets imported and called by ./tests/wasm.rs to run the same tests this module
-/// runs, only in wasm32.
-pub fn test_aggregate_verify_cross() {
-    use super::*;
-    // check aggregation of witnesses using cross set commitment scheme
-
-    // Set 1
-    let age = "age = 30";
-    let name = "name = Alice";
-    let drivers = "driver license = 12";
-
-    // Set 2
-    let gender = "Gender = male";
-    let company = "company = ACME Inc.";
-    let alt_drivers = "driver license type = B";
-
-    let set_str: Entry =
-        Entry(vec![Attribute::new(age), Attribute::new(name), Attribute::new(drivers)]);
-
-    let set_str2: Entry = Entry(vec![
-        Attribute::new(gender),
-        Attribute::new(company),
-        Attribute::new(alt_drivers),
-    ]);
-
-    // create two set commitments for two sets set_str and set_str2
-    let max_cardinal = 5;
-
-    // CrossSetCommitment should be;
-    // Ways to create a CrossSetCommitment:
-    // new(max_cardinal) -> CrossSetCommitment
-    // from(PublicParameters) -> CrossSetCommitmen
-
-    let csc = CrossSetCommitment::new(MaxCardinality(max_cardinal));
-    let (commitment_1, opening_info_1) = CrossSetCommitment::commit_set(&csc.param_sc, &set_str);
-    let (commitment_2, opening_info_2) = CrossSetCommitment::commit_set(&csc.param_sc, &set_str2);
-
-    let commit_vector = &vec![commitment_1, commitment_2];
-
-    // create a witness for each subset -> W1 and W2
-    let subset_str_1 =
-        Entry(vec![Attribute::new(age), Attribute::new(name), Attribute::new(drivers)]);
-
-    let subset_str_2 = Entry(vec![Attribute::new(gender), Attribute::new(company)]);
-
-    let witness_1 =
-        CrossSetCommitment::open_subset(&csc.param_sc, &set_str, &opening_info_1, &subset_str_1)
-            .expect("Some Witness");
-
-    let witness_2 =
-        CrossSetCommitment::open_subset(&csc.param_sc, &set_str2, &opening_info_2, &subset_str_2)
-            .expect("Some Witness");
-
-    // aggregate all witnesses for a subset is correct -> proof
-    let proof = CrossSetCommitment::aggregate_cross(&vec![witness_1, witness_2], commit_vector);
-
-    // verification aggregated witnesses
-    assert!(CrossSetCommitment::verify_cross(
-        &csc.param_sc,
-        commit_vector,
-        &[subset_str_1, subset_str_2],
-        &proof
-    ));
-}
-
 #[cfg(test)]
 mod test {
-    use crate::attributes::Attribute;
+    use crate::dac::Attribute;
 
     use super::*;
 
@@ -590,37 +537,34 @@ mod test {
     fn test_commit_and_open() {
         let max_cardinal = 5;
 
-        // Set 1
-        let age = "age = 30";
-        let name = "name = Alice";
-        let drivers = "driver license = 12";
-
-        let set_str: Entry =
-            Entry(vec![Attribute::new(age), Attribute::new(name), Attribute::new(drivers)]);
+        let attrib_set: Entry = Entry(vec![
+            Attribute::from(("Age", "Over18")),
+            Attribute::from(("Sex", "female")),
+            Attribute::from(("License", "Driver")),
+        ]);
 
         let sc = SetCommitment::new(MaxCardinality(max_cardinal));
-        let (commitment, witness) = SetCommitment::commit_set(&sc.param_sc, &set_str);
+        let (commitment, witness) = SetCommitment::commit_set(&sc.param_sc, &attrib_set);
         // assrt open_set with pp, commitment, O, set_str
-        assert!(SetCommitment::open_set(&sc.param_sc, &commitment, &witness, &set_str));
+        assert!(SetCommitment::open_set(&sc.param_sc, &commitment, &witness, &attrib_set));
     }
 
     #[test]
     fn test_open_verify_subset() {
         let max_cardinal = 5;
 
-        // Set 1
-        let age = "age = 30";
-        let name = "name = Alice";
-        let drivers = "driver license = 12";
+        let attrib_set: Entry = Entry(vec![
+            Attribute::from(("Age", "Over18")),
+            Attribute::from(("Sex", "female")),
+            Attribute::from(("License", "Driver")),
+        ]);
+        let attrib_subset =
+            Entry(vec![Attribute::from(("Age", "Over18")), Attribute::from(("License", "Driver"))]);
 
-        let set_str =
-            Entry(vec![Attribute::new(age), Attribute::new(name), Attribute::new(drivers)]);
-
-        let subset_str_1 = Entry(vec![Attribute::new(age), Attribute::new(name)]);
         let sc = SetCommitment::new(MaxCardinality(max_cardinal));
-        let (commitment, opening_info) = SetCommitment::commit_set(&sc.param_sc, &set_str);
+        let (commitment, opening_info) = SetCommitment::commit_set(&sc.param_sc, &attrib_set);
         let witness_subset =
-            SetCommitment::open_subset(&sc.param_sc, &set_str, &opening_info, &subset_str_1);
+            SetCommitment::open_subset(&sc.param_sc, &attrib_set, &opening_info, &attrib_subset);
 
         // assert that there is some witness_subset
         assert!(witness_subset.is_some());
@@ -630,7 +574,7 @@ mod test {
         assert!(SetCommitment::verify_subset(
             &sc.param_sc,
             &commitment,
-            &subset_str_1,
+            &attrib_subset,
             &witness_subset
         ));
     }
@@ -639,23 +583,16 @@ mod test {
     fn test_aggregate_verify_cross() {
         // check aggregation of witnesses using cross set commitment scheme
 
-        // Set 1
-        let age = "age = 30";
-        let name = "name = Alice";
-        let drivers = "driver license = 12";
+        let attrib_set_a: Entry = Entry(vec![
+            Attribute::from(("AGE", "OVER18")),
+            Attribute::from(("GENDER", "FEM")),
+            Attribute::from(("LICENSE", "DRIVER")),
+        ]);
 
-        // Set 2
-        let gender = "Gender = male";
-        let company = "company = ACME Inc.";
-        let alt_drivers = "driver license type = B";
-
-        let set_str: Entry =
-            Entry(vec![Attribute::new(age), Attribute::new(name), Attribute::new(drivers)]);
-
-        let set_str2: Entry = Entry(vec![
-            Attribute::new(gender),
-            Attribute::new(company),
-            Attribute::new(alt_drivers),
+        let attrib_set_b: Entry = Entry(vec![
+            Attribute::from(("DRIVER", "TYPEB")),
+            Attribute::from(("COMPANY", "ACME")),
+            Attribute::from(("ROLE", "DELIVERY")),
         ]);
 
         // create two set commitments for two sets set_str and set_str2
@@ -668,31 +605,34 @@ mod test {
 
         let csc = CrossSetCommitment::new(MaxCardinality(max_cardinal));
         let (commitment_1, opening_info_1) =
-            CrossSetCommitment::commit_set(&csc.param_sc, &set_str);
+            CrossSetCommitment::commit_set(&csc.param_sc, &attrib_set_a);
         let (commitment_2, opening_info_2) =
-            CrossSetCommitment::commit_set(&csc.param_sc, &set_str2);
+            CrossSetCommitment::commit_set(&csc.param_sc, &attrib_set_b);
 
         let commit_vector = &vec![commitment_1, commitment_2];
 
         // create a witness for each subset -> W1 and W2
-        let subset_str_1 =
-            Entry(vec![Attribute::new(age), Attribute::new(name), Attribute::new(drivers)]);
-
-        let subset_str_2 = Entry(vec![Attribute::new(gender), Attribute::new(company)]);
+        let attrib_subset_1 = Entry(vec![
+            Attribute::from(("AGE", "OVER18")),
+            Attribute::from(("GENDER", "FEM")),
+            Attribute::from(("LICENSE", "DRIVER")),
+        ]);
+        let attrib_subset_2 =
+            Entry(vec![Attribute::from(("DRIVER", "TYPEB")), Attribute::from(("COMPANY", "ACME"))]);
 
         let witness_1 = CrossSetCommitment::open_subset(
             &csc.param_sc,
-            &set_str,
+            &attrib_set_a,
             &opening_info_1,
-            &subset_str_1,
+            &attrib_subset_1,
         )
         .expect("Some Witness");
 
         let witness_2 = CrossSetCommitment::open_subset(
             &csc.param_sc,
-            &set_str2,
+            &attrib_set_b,
             &opening_info_2,
-            &subset_str_2,
+            &attrib_subset_2,
         )
         .expect("Some Witness");
 
@@ -703,7 +643,7 @@ mod test {
         assert!(CrossSetCommitment::verify_cross(
             &csc.param_sc,
             commit_vector,
-            &[subset_str_1, subset_str_2],
+            &[attrib_subset_1, attrib_subset_2],
             &proof
         ));
     }
@@ -729,17 +669,4 @@ mod test {
         let param_sc_decompressed = ParamSetCommitment::try_from(param_sc_compressed).unwrap();
         assert_eq!(param_sc, param_sc_decompressed);
     }
-
-    // #[test]
-    // fn test_generator() {
-    //     let g1 = G1Projective::GENERATOR;
-    //     let g2 = G2Projective::GENERATOR;
-    //     println!("G1 generator: {:?}", g1);
-    //     println!("G2 generator: {:?}", g2);
-    //
-    //     // rand Scalar
-    //     let fe = Scalar::random(ThreadRng::default());
-    //     println!("Random Scalar: {:?}", fe);
-    //
-    // }
 }
