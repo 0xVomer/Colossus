@@ -3,6 +3,12 @@
 
 # Colossus
 
+## Features: ¬
+
+### CP-ABE Scheme: ¬
+
+
+
 
 # How to use: ¬
 

@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "colossus-core",
-    "explorations/healthcare",
+    # "explorations/healthcare",
 
 ]
 resolver = "2"
@@ -24,6 +24,7 @@ unused_qualifications = "warn"
 [workspace.dependencies]
 colossus-core = { path = "colossus-core" }
 
+cid = { version = "0.11.1", features = ["serde"] }
 cosmian_crypto_core = { version = "10.0.1", default-features = false, features = [
   "ser",
   "sha3",
@@ -31,6 +32,7 @@ cosmian_crypto_core = { version = "10.0.1", default-features = false, features =
   "chacha",
   "curve25519",
 ] }
+bls12_381_plus = { version = "0.8.18", features = ["expose-fields", "alloc"] }
 elliptic-curve = { version = "0.13.8" }
 ml-kem = { version = "0.2.1", features = ["zeroize"] }
 p256 = { version = "0.13.2" }

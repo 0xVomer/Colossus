@@ -12,21 +12,27 @@ fn test_edit_anarchic_attributes() {
     // Try renaming Research to already used name MKG
     assert!(
         structure
-            .rename_attribute(&QualifiedAttribute::new("DPT", "RD"), "MKG".to_string(),)
+            .update_attribute(
+                &QualifiedAttribute::new("DPT", "RD"),
+                QualifiedAttribute::new("DPT", "MKG").bytes(),
+            )
             .is_err()
     );
 
     // Rename RD to Research
     assert!(
         structure
-            .rename_attribute(&QualifiedAttribute::new("DPT", "RD"), "Research".to_string(),)
+            .update_attribute(
+                &QualifiedAttribute::new("DPT", "RD"),
+                QualifiedAttribute::new("DPT", "Research").bytes(),
+            )
             .is_ok()
     );
 
     let order: Vec<_> = structure
         .attributes()
         .filter(|a| a.dimension.as_str() == "SEC")
-        .map(|a| a.name)
+        .map(|a| a.cid)
         .collect();
 
     assert!(order.len() == 2);
@@ -92,27 +98,24 @@ fn test_edit_hierarchic_attributes() {
     assert_eq!(
         structure.attributes().filter(|a| a.dimension == "SEC").collect::<Vec<_>>(),
         vec![
-            QualifiedAttribute {
-                dimension: "SEC".to_string(),
-                name: "LOW".to_string(),
-            },
-            QualifiedAttribute {
-                dimension: "SEC".to_string(),
-                name: "TOP".to_string(),
-            },
+            QualifiedAttribute::from(("SEC", "LOW")),
+            QualifiedAttribute::from(("SEC", "TOP")),
         ]
     );
 
     // Rename ordered dimension
     assert!(
         structure
-            .rename_attribute(&QualifiedAttribute::new("SEC", "LOW"), "WOL".to_string(),)
+            .update_attribute(
+                &QualifiedAttribute::new("SEC", "LOW"),
+                QualifiedAttribute::new("SEC", "WOL").bytes(),
+            )
             .is_ok()
     );
 
-    let order = structure.attributes().map(|q| q.name).collect::<Vec<_>>();
-    assert!(order.contains(&"WOL".to_string()));
-    assert!(!order.contains(&"LOW".to_string()));
+    let order = structure.attributes().map(|q| q.cid).collect::<Vec<_>>();
+    assert!(order.contains(&QualifiedAttribute::new("SEC", "WOL").cid));
+    assert!(!order.contains(&QualifiedAttribute::new("SEC", "LOW").cid));
 
     //// Try modifying hierarchical dimension
     structure.del_attribute(&QualifiedAttribute::new("SEC", "WOL")).unwrap();
@@ -122,14 +125,8 @@ fn test_edit_hierarchic_attributes() {
     assert_eq!(
         structure.attributes().filter(|a| a.dimension == "SEC").collect::<Vec<_>>(),
         vec![
-            QualifiedAttribute {
-                dimension: "SEC".to_string(),
-                name: "MID".to_string(),
-            },
-            QualifiedAttribute {
-                dimension: "SEC".to_string(),
-                name: "TOP".to_string(),
-            },
+            QualifiedAttribute::from(("SEC", "MID")),
+            QualifiedAttribute::from(("SEC", "TOP")),
         ]
     );
 
@@ -138,18 +135,9 @@ fn test_edit_hierarchic_attributes() {
     assert_eq!(
         structure.attributes().filter(|a| a.dimension == "SEC").collect::<Vec<_>>(),
         vec![
-            QualifiedAttribute {
-                dimension: "SEC".to_string(),
-                name: "LOW".to_string(),
-            },
-            QualifiedAttribute {
-                dimension: "SEC".to_string(),
-                name: "MID".to_string(),
-            },
-            QualifiedAttribute {
-                dimension: "SEC".to_string(),
-                name: "TOP".to_string(),
-            },
+            QualifiedAttribute::from(("SEC", "LOW")),
+            QualifiedAttribute::from(("SEC", "MID")),
+            QualifiedAttribute::from(("SEC", "TOP")),
         ]
     );
 
@@ -162,18 +150,9 @@ fn test_edit_hierarchic_attributes() {
     assert_eq!(
         structure.attributes().filter(|a| a.dimension == "SEC").collect::<Vec<_>>(),
         vec![
-            QualifiedAttribute {
-                dimension: "SEC".to_string(),
-                name: "LOW".to_string(),
-            },
-            QualifiedAttribute {
-                dimension: "SEC".to_string(),
-                name: "MID".to_string(),
-            },
-            QualifiedAttribute {
-                dimension: "SEC".to_string(),
-                name: "TOP".to_string(),
-            },
+            QualifiedAttribute::from(("SEC", "LOW")),
+            QualifiedAttribute::from(("SEC", "MID")),
+            QualifiedAttribute::from(("SEC", "TOP")),
         ]
     );
 
