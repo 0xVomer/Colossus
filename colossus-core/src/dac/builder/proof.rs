@@ -1,16 +1,16 @@
 use super::*;
 
 pub struct ProofBuilder<'a, Stage> {
-    nym: &'a Alias<Stage>,
+    alias: &'a Alias<Stage>,
     cred: &'a Credential,
     all_attributes: Vec<Entry>,
     selected_attributes: Vec<QualifiedAttribute>,
 }
 
 impl<'a, Stage> ProofBuilder<'a, Stage> {
-    pub fn new(nym: &'a Alias<Stage>, cred: &'a Credential, all_attributes: &[Entry]) -> Self {
+    pub fn new(alias: &'a Alias<Stage>, cred: &'a Credential, all_attributes: &[Entry]) -> Self {
         Self {
-            nym,
+            alias,
             cred,
             all_attributes: all_attributes.to_vec(),
             selected_attributes: Vec::new(),
@@ -35,7 +35,7 @@ impl<'a, Stage> ProofBuilder<'a, Stage> {
             })
             .collect::<Vec<Entry>>();
 
-        let proof = self.nym.prove(self.cred, &self.all_attributes, &selected_attr, nonce);
+        let proof = self.alias.prove(self.cred, &self.all_attributes, &selected_attr, nonce);
 
         (proof, selected_attr)
     }

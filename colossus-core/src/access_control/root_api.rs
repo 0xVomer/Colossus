@@ -14,17 +14,17 @@ use std::sync::{Mutex, MutexGuard};
 use zeroize::Zeroizing;
 
 #[derive(Debug)]
-pub struct Root {
+pub struct AccessControl {
     rng: Mutex<CsRng>,
 }
 
-impl Default for Root {
+impl Default for AccessControl {
     fn default() -> Self {
         Self { rng: Mutex::new(CsRng::from_entropy()) }
     }
 }
 
-impl Root {
+impl AccessControl {
     pub fn rng(&self) -> MutexGuard<CsRng> {
         self.rng.lock().expect("poisoned mutex")
     }
@@ -68,7 +68,7 @@ impl Root {
         auth.rpk()
     }
 
-    pub fn generate_user_secret_key(
+    pub fn grant_access_right_keys(
         &self,
         auth: &mut RootAuthority,
         ap: &AccessPolicy,
@@ -98,7 +98,7 @@ impl Root {
     }
 }
 
-impl KemAc<SHARED_SECRET_LENGTH> for Root {
+impl KemAc<SHARED_SECRET_LENGTH> for AccessControl {
     type EncapsulationKey = RootPublicKey;
     type DecapsulationKey = UserSecretKey;
     type Encapsulation = XEnc;
@@ -124,7 +124,9 @@ impl KemAc<SHARED_SECRET_LENGTH> for Root {
     }
 }
 
-impl<const KEY_LENGTH: usize, E: AE<KEY_LENGTH, Error = Error>> PkeAc<KEY_LENGTH, E> for Root {
+impl<const KEY_LENGTH: usize, E: AE<KEY_LENGTH, Error = Error>> PkeAc<KEY_LENGTH, E>
+    for AccessControl
+{
     type EncryptionKey = RootPublicKey;
     type DecryptionKey = UserSecretKey;
     type Ciphertext = (XEnc, Vec<u8>);

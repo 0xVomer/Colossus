@@ -185,10 +185,10 @@ impl<Stage> Alias<Stage> {
         let mu = Scalar::ONE;
         let psi = Scalar::random(rng);
 
-        let (nym_p_pk, cred_prime, chi) =
+        let (alias_p_pk, cred_prime, chi) =
             super::spseq_uc::change_rep(&self.public.key, cred, &mu, &psi, true);
 
-        let nym = Alias::from_components(&self.secret, Chi(chi), Psi(psi));
+        let alias = Alias::from_components(&self.secret, Chi(chi), Psi(psi));
 
         let mut cred_prime = cred_prime;
         if let Some(addl_attrs) = addl_attrs {
@@ -210,7 +210,7 @@ impl<Stage> Alias<Stage> {
 
         if !verify(
             &cred_prime.issuer_public.vk,
-            &nym_p_pk,
+            &alias_p_pk,
             &cred_prime.commitment_vector,
             &cred_prime.sigma,
         ) {
@@ -219,7 +219,7 @@ impl<Stage> Alias<Stage> {
             ));
         }
 
-        let orphan = nym.send_convert_sig(&cred_prime.issuer_public.vk, cred_prime.sigma.clone());
+        let orphan = alias.send_convert_sig(&cred_prime.issuer_public.vk, cred_prime.sigma.clone());
 
         Ok(Offer(Credential { sigma: orphan, ..cred_prime }))
     }
@@ -269,10 +269,10 @@ impl<Stage> Alias<Stage> {
         let mu = Scalar::random(rng.clone());
         let psi = Scalar::random(rng);
 
-        let (_nym_p, cred_p, chi) =
+        let (_alias_p, cred_p, chi) =
             super::spseq_uc::change_rep(&self.public.key, cred, &mu, &psi, false);
 
-        let nym: Alias<Randomized> = Alias::from_components(&self.secret, Chi(chi), Psi(psi));
+        let alias: Alias<Randomized> = Alias::from_components(&self.secret, Chi(chi), Psi(psi));
 
         let (witness_vector, commit_vector) = selected_attrs
             .iter()
@@ -300,11 +300,11 @@ impl<Stage> Alias<Stage> {
             sigma: cred_p.sigma,
             commitment_vector: cred_p.commitment_vector.iter().map(|c| c.to_affine()).collect(),
             witness_pi: witness_pi.into(),
-            nym_proof: nym.nym_proof(nonce),
+            alias_proof: alias.alias_proof(nonce),
         }
     }
 
-    pub fn nym_proof(&self, nonce: &Nonce) -> AliasProof {
+    pub fn alias_proof(&self, nonce: &Nonce) -> AliasProof {
         let (pedersen_commit, pedersen_open) = self.public.damgard.announce(nonce);
 
         let state = ChallengeState::new(

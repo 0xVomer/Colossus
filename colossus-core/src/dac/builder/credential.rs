@@ -27,10 +27,10 @@ impl<'a> CredentialBuilder<'a> {
 
     pub fn issue_to(
         &self,
-        nym_proof: &AliasProof,
+        alias_proof: &AliasProof,
         nonce: Option<&Nonce>,
     ) -> Result<Credential, IssuerError> {
         let k_prime = self.extendable.checked_sub(0);
-        self.issuer.issue_cred(&self.entries, k_prime, nym_proof, nonce)
+        self.issuer.issue_cred(&self.entries, k_prime, alias_proof, nonce)
     }
 }

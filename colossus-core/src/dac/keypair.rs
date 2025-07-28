@@ -141,11 +141,11 @@ pub fn verify_proof(
         &proof.witness_pi.into(),
     );
 
-    let check_zkp_verify = DamgardTransform::verify(&proof.nym_proof, nonce);
+    let check_zkp_verify = DamgardTransform::verify(&proof.alias_proof, nonce);
 
     let verify_sig = verify(
         &issuer_public.vk,
-        &proof.nym_proof.public_key.into(),
+        &proof.alias_proof.public_key.into(),
         &proof.commitment_vector.iter().map(|c| c.into()).collect::<Vec<_>>(),
         &proof.sigma,
     );

@@ -170,17 +170,17 @@ impl Issuer {
         &self,
         attr_vector: &[Entry],
         k_prime: Option<usize>,
-        nym_proof: &AliasProof,
+        alias_proof: &AliasProof,
         nonce: Option<&Nonce>,
     ) -> Result<Credential, IssuerError> {
-        if !DamgardTransform::verify(nym_proof, nonce) {
+        if !DamgardTransform::verify(alias_proof, nonce) {
             return Err(IssuerError::InvalidAliasProof);
         }
 
-        let cred = self.sign(&nym_proof.public_key.into(), attr_vector, k_prime)?;
+        let cred = self.sign(&alias_proof.public_key.into(), attr_vector, k_prime)?;
         assert!(verify(
             &self.public.vk,
-            &nym_proof.public_key.into(),
+            &alias_proof.public_key.into(),
             &cred.commitment_vector,
             &cred.sigma
         ));

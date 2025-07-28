@@ -1,7 +1,7 @@
 use super::*;
 
 pub struct OfferBuilder<'a, Stage> {
-    our_nym: &'a Alias<Stage>,
+    our_alias: &'a Alias<Stage>,
     credential: &'a Credential,
     unprovable_attributes: Vec<QualifiedAttribute>,
     current_entries: Vec<Entry>,
@@ -11,12 +11,12 @@ pub struct OfferBuilder<'a, Stage> {
 
 impl<'a, Stage> OfferBuilder<'a, Stage> {
     pub fn new(
-        our_nym: &'a Alias<Stage>,
+        our_alias: &'a Alias<Stage>,
         credential: &'a Credential,
         current_entries: &[Entry],
     ) -> Self {
         Self {
-            our_nym,
+            our_alias,
             credential,
             unprovable_attributes: Vec::new(),
             current_entries: current_entries.to_vec(),
@@ -82,7 +82,7 @@ impl<'a, Stage> OfferBuilder<'a, Stage> {
             ),
         };
 
-        let offer = self.our_nym.offer(&cred_redacted, &self.additional_entry)?;
+        let offer = self.our_alias.offer(&cred_redacted, &self.additional_entry)?;
 
         Ok((offer, provable_entries))
     }

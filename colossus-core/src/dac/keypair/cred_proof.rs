@@ -7,7 +7,7 @@ pub struct CredProof {
     pub(super) sigma: Signature,
     pub(super) commitment_vector: Vec<G1Affine>,
     pub(super) witness_pi: G1Affine,
-    pub(super) nym_proof: AliasProof,
+    pub(super) alias_proof: AliasProof,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -18,7 +18,7 @@ pub struct CredProofCompressed {
 
     pub witness_pi: Vec<u8>,
 
-    pub nym_proof: AliasProofCompressed,
+    pub alias_proof: AliasProofCompressed,
 }
 
 impl CBORCodec for CredProofCompressed {}
@@ -33,7 +33,7 @@ impl From<CredProof> for CredProofCompressed {
                 .map(|c| c.to_compressed().to_vec())
                 .collect(),
             witness_pi: item.witness_pi.to_compressed().to_vec(),
-            nym_proof: AliasProofCompressed::from(item.nym_proof),
+            alias_proof: AliasProofCompressed::from(item.alias_proof),
         }
     }
 }
@@ -43,7 +43,7 @@ impl TryFrom<CredProofCompressed> for CredProof {
 
     fn try_from(item: CredProofCompressed) -> Result<Self, Self::Error> {
         let sigma = Signature::try_from(item.sigma)?;
-        let nym_proof = AliasProof::try_from(item.nym_proof)?;
+        let alias_proof = AliasProof::try_from(item.alias_proof)?;
 
         let commitment_vector = item
             .commitment_vector
@@ -78,7 +78,7 @@ impl TryFrom<CredProofCompressed> for CredProof {
             sigma,
             commitment_vector: commitment_vector.iter().map(|c| c.to_affine()).collect(),
             witness_pi: witness_pi.into(),
-            nym_proof,
+            alias_proof,
         })
     }
 }

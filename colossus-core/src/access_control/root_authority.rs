@@ -1019,7 +1019,7 @@ impl UserId {
 mod tests {
     use super::*;
     use crate::{
-        access_control::{Root, cryptography::traits::KemAc, test_utils::gen_auth},
+        access_control::{AccessControl, cryptography::traits::KemAc, test_utils::gen_auth},
         policy::AccessPolicy,
     };
     use cosmian_crypto_core::{
@@ -1061,10 +1061,10 @@ mod tests {
         }
 
         {
-            let api = Root::default();
+            let api = AccessControl::default();
             let (mut msk, mpk) = gen_auth(&api, false).unwrap();
             let usk = api
-                .generate_user_secret_key(&mut msk, &AccessPolicy::parse("SEC::TOP").unwrap())
+                .grant_access_right_keys(&mut msk, &AccessPolicy::parse("SEC::TOP").unwrap())
                 .unwrap();
             let (_, enc) = api.encaps(&mpk, &AccessPolicy::parse("DPT::MKG").unwrap()).unwrap();
 
@@ -1081,7 +1081,7 @@ mod test {
     use super::*;
     use crate::{
         access_control::{
-            Root,
+            AccessControl,
             cryptography::{
                 MIN_TRACING_LEVEL,
                 traits::{KemAc, PkeAc},
@@ -1262,13 +1262,13 @@ mod test {
     #[test]
     fn test_reencrypt_with_auth() {
         let ap = AccessPolicy::parse("DPT::FIN && SEC::TOP").unwrap();
-        let cc = Root::default();
+        let cc = AccessControl::default();
 
         let mut rng = CsRng::from_entropy();
 
         let (mut auth, _) = gen_auth(&cc, false).unwrap();
         let rpk = cc.update_auth(&mut auth).expect("cannot update master keys");
-        let mut usk = cc.generate_user_secret_key(&mut auth, &ap).expect("cannot generate usk");
+        let mut usk = cc.grant_access_right_keys(&mut auth, &ap).expect("cannot generate usk");
 
         let (old_key, old_enc) = cc.encaps(&rpk, &ap).unwrap();
         assert_eq!(Some(&old_key), usk.decapsulate(&mut rng, &old_enc).unwrap().as_ref());
@@ -1284,10 +1284,10 @@ mod test {
     #[test]
     fn test_root_kem() {
         let ap = AccessPolicy::parse("DPT::FIN && SEC::TOP").unwrap();
-        let api = Root::default();
+        let api = AccessControl::default();
         let (mut auth, _rpk) = gen_auth(&api, false).unwrap();
         let rpk = api.update_auth(&mut auth).expect("cannot update master keys");
-        let usk = api.generate_user_secret_key(&mut auth, &ap).expect("cannot generate usk");
+        let usk = api.grant_access_right_keys(&mut auth, &ap).expect("cannot generate usk");
         let (secret, enc) = api.encaps(&rpk, &ap).unwrap();
         let res = api.decaps(&usk, &enc).unwrap();
         assert_eq!(secret, res.unwrap());
@@ -1296,7 +1296,7 @@ mod test {
     #[test]
     fn test_root_pke() {
         let ap = AccessPolicy::parse("DPT::FIN && SEC::TOP").unwrap();
-        let api = Root::default();
+        let api = AccessControl::default();
         let (mut auth, rpk) = gen_auth(&api, false).unwrap();
 
         let ptx = "testing encryption/decryption".as_bytes();
@@ -1306,7 +1306,7 @@ mod test {
             &api, &rpk, &ap, ptx, aad,
         )
         .expect("cannot encrypt!");
-        let usk = api.generate_user_secret_key(&mut auth, &ap).expect("cannot generate usk");
+        let usk = api.grant_access_right_keys(&mut auth, &ap).expect("cannot generate usk");
         let ptx1 = PkeAc::<{ XChaCha20Poly1305::KEY_LENGTH }, XChaCha20Poly1305>::decrypt(
             &api, &usk, &ctx, aad,
         )

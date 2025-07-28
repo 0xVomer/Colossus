@@ -1,6 +1,6 @@
 use crate::{
     access_control::{
-        Root, RootPublicKey,
+        AccessControl, RootPublicKey,
         cryptography::{SHARED_SECRET_LENGTH, XEnc, traits::KemAc},
         root_authority::UserSecretKey,
     },
@@ -25,7 +25,7 @@ pub struct EncryptedHeader {
 
 impl EncryptedHeader {
     pub fn generate(
-        api: &Root,
+        api: &AccessControl,
         rpk: &RootPublicKey,
         ap: &AccessPolicy,
         metadata: Option<&[u8]>,
@@ -51,7 +51,7 @@ impl EncryptedHeader {
 
     pub fn decrypt(
         &self,
-        api: &Root,
+        api: &AccessControl,
         usk: &UserSecretKey,
         authentication_data: Option<&[u8]>,
     ) -> Result<Option<CleartextHeader>, Error> {
@@ -154,11 +154,11 @@ mod serialization {
         use crate::access_control::test_utils::gen_auth;
         use cosmian_crypto_core::bytes_ser_de::test_serialization;
 
-        let api = Root::default();
+        let api = AccessControl::default();
         let (mut msk, mpk) = gen_auth(&api, false).unwrap();
 
         let ap = AccessPolicy::parse("(DPT::MKG || DPT::FIN) && SEC::TOP").unwrap();
-        let usk = api.generate_user_secret_key(&mut msk, &ap).unwrap();
+        let usk = api.grant_access_right_keys(&mut msk, &ap).unwrap();
 
         let test_encrypted_header = |ap, metadata, authentication_data| {
             let (secret, encrypted_header) =

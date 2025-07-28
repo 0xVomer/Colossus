@@ -236,19 +236,19 @@ impl DamgardTransform {
         (pedersen_commit, pedersen_open)
     }
 
-    pub fn verify(nym_proof: &AliasProof, nonce: Option<&Nonce>) -> bool {
+    pub fn verify(alias_proof: &AliasProof, nonce: Option<&Nonce>) -> bool {
         if let Some(nonce) = nonce {
-            if nym_proof.pedersen_open.open_randomness != *nonce {
+            if alias_proof.pedersen_open.open_randomness != *nonce {
                 return false;
             }
         }
-        let left_side = G1Projective::mul_by_generator(&nym_proof.response);
-        let right_side = nym_proof.pedersen_open.announce_element.as_ref().unwrap()
-            + nym_proof.challenge * nym_proof.public_key;
-        let decommit = nym_proof
+        let left_side = G1Projective::mul_by_generator(&alias_proof.response);
+        let right_side = alias_proof.pedersen_open.announce_element.as_ref().unwrap()
+            + alias_proof.challenge * alias_proof.public_key;
+        let decommit = alias_proof
             .damgard
             .pedersen
-            .decommit(&nym_proof.pedersen_open, &nym_proof.pedersen_commit.into());
+            .decommit(&alias_proof.pedersen_open, &alias_proof.pedersen_commit.into());
 
         (left_side == right_side) && decommit
     }
@@ -431,7 +431,7 @@ mod tests {
             &secret,
         );
 
-        let proof_nym = AliasProof {
+        let proof_alias = AliasProof {
             challenge,
             pedersen_open,
             pedersen_commit,
@@ -440,7 +440,7 @@ mod tests {
             damgard,
         };
 
-        assert!(DamgardTransform::verify(&proof_nym, Some(&nonce)));
+        assert!(DamgardTransform::verify(&proof_alias, Some(&nonce)));
     }
 
     #[test]

@@ -35,7 +35,7 @@ impl std::fmt::Display for IssuerError {
                 "TooLongEntries. You passed too many Entries. Hint: reduce the number of Entries to be less than the max entries of this Issuer."
             ),
             IssuerError::InvalidAliasProof => {
-                write!(f, "InvalidAliasProof. The proof of the pseudonym is invalid.")
+                write!(f, "InvalidAliasProof. The proof of the pseudoalias is invalid.")
             },
             IssuerError::UpdateError(e) => write!(f, "UpdateError: {}", e),
         }

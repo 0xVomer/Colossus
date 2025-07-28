@@ -8,11 +8,9 @@ pub use proof::ProofBuilder;
 
 use crate::{
     dac::{
-        entry::{Entry, MaxEntries},
+        entry::Entry,
         error::Error,
-        keypair::{
-            Alias, AliasProof, CredProof, Credential, Issuer, IssuerError, Offer, verify_proof,
-        },
+        keypair::{Alias, AliasProof, CredProof, Credential, Issuer, IssuerError, Offer},
         zkp::Nonce,
     },
     policy::QualifiedAttribute,
