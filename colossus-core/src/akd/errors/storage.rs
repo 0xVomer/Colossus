@@ -1,13 +1,11 @@
-/// Represents a storage-layer error
 #[derive(Debug, PartialEq, Eq)]
 pub enum StorageError {
-    /// Data wasn't found in the storage layer
     NotFound(String),
-    /// A transaction error
+
     Transaction(String),
-    /// Some kind of storage connection error occurred
+
     Connection(String),
-    /// Some other storage-layer error occurred
+
     Other(String),
 }
 

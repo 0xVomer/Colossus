@@ -1,14 +1,12 @@
-use super::{Attribute, DEFAULT_MAX_ENTRIES, error::Error};
+use super::{Attribute, DEFAULT_MAX_ENTRIES};
 use bls12_381_plus::{Scalar, elliptic_curve::bigint};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
-/// Entry is a vector of Attributes
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Entry(pub Vec<Attribute>);
 
 impl Entry {
-    /// Returns a new Entry with the given attributes
     pub fn new(attributes: &[Attribute]) -> Self {
         Entry(attributes.to_vec())
     }
@@ -36,34 +34,18 @@ impl std::iter::FromIterator<Attribute> for Entry {
     }
 }
 
-/// [Entry] from a vector of [Attribute]s
 impl From<Vec<Attribute>> for Entry {
     fn from(item: Vec<Attribute>) -> Self {
         Entry(item)
     }
 }
 
-// /// Try from an arbitrary vector of bytes
-// impl TryFrom<Vec<Vec<u8>>> for Entry {
-//     type Error = Error;
-
-//     fn try_from(bytes: Vec<Vec<u8>>) -> Result<Self, Self::Error> {
-//         let attributes = bytes
-//             .into_iter()
-//             .map(|attr| Attribute::try_from(attr))
-//             .collect::<Result<Vec<Attribute>, Error>>()?;
-//         Ok(Entry::new(&attributes))
-//     }
-// }
-
-/// [Entry] from a slice of [Attribute]s
 impl From<&[Attribute]> for Entry {
     fn from(item: &[Attribute]) -> Self {
         Entry(item.to_vec())
     }
 }
 
-/// Iterates through each Attribute in the Entry and converts it to a Scalar
 pub fn entry_to_scalar(input: &Entry) -> Vec<Scalar> {
     input
         .iter()
@@ -71,9 +53,6 @@ pub fn entry_to_scalar(input: &Entry) -> Vec<Scalar> {
         .collect()
 }
 
-/// Max number of entries in a credential.
-///
-/// Defaults to [DEFAULT_MAX_ENTRIES] (6)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MaxEntries(pub usize);
 
@@ -83,7 +62,6 @@ impl From<usize> for MaxEntries {
     }
 }
 
-// from u8
 impl From<u8> for MaxEntries {
     fn from(item: u8) -> Self {
         MaxEntries(item as usize)
@@ -133,7 +111,6 @@ mod test {
 
     #[test]
     fn test_entry() {
-        // check whether Entry can be checked for is_empty
         let entry = Entry(vec![]);
         assert!(entry.is_empty());
     }

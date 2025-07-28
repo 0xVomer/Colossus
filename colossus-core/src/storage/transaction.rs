@@ -1,5 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! A simple in-memory transaction object to minimize data-layer operations
 use super::traits::Storable;
 use super::types::{DbRecord, ValueState, ValueStateRetrievalFlag};
 use crate::akd::errors::StorageError;
@@ -10,10 +8,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Represents an in-memory transaction, keeping a mutable state
-/// of the changes. When you "commit" this transaction, you return the
-/// collection of values which need to be written to the storage layer
-/// including all mutations. Rollback simply empties the transaction state.
 #[derive(Clone)]
 pub struct Transaction {
     mods: Arc<DashMap<Vec<u8>, DbRecord>>,
@@ -39,7 +33,6 @@ impl Default for Transaction {
 }
 
 impl Transaction {
-    /// Instantiate a new transaction instance
     pub fn new() -> Self {
         Self {
             mods: Arc::new(DashMap::new()),
@@ -49,12 +42,10 @@ impl Transaction {
         }
     }
 
-    /// Get the current number of items currently in the transaction modifications set
     pub fn count(&self) -> usize {
         self.mods.len()
     }
 
-    /// Log metrics about the current transaction instance. Metrics will be cleared after log call
     pub fn log_metrics(&self) {
         let r = self.num_reads.swap(0, Ordering::Relaxed);
         let w = self.num_writes.swap(0, Ordering::Relaxed);
@@ -63,49 +54,40 @@ impl Transaction {
         info!("{msg}");
     }
 
-    /// Start a transaction in the storage layer.
     pub fn begin_transaction(&self) -> bool {
         !self.active.swap(true, Ordering::Relaxed)
     }
 
-    /// Commit a transaction in the storage layer.
     pub fn commit_transaction(&self) -> Result<Vec<DbRecord>, StorageError> {
         if !self.active.load(Ordering::Relaxed) {
             return Err(StorageError::Transaction("Transaction not currently active".to_string()));
         }
 
-        // copy all the updated values out
         let mut records = self.mods.iter().map(|p| p.value().clone()).collect::<Vec<_>>();
 
-        // sort according to transaction priority
         records.sort_by_key(|r| r.transaction_priority());
 
-        // flush the trans log
         self.mods.clear();
 
         self.active.store(false, Ordering::Relaxed);
         Ok(records)
     }
 
-    /// Rollback a transaction.
     pub fn rollback_transaction(&self) -> Result<(), StorageError> {
         if !self.active.load(Ordering::Relaxed) {
             return Err(StorageError::Transaction("Transaction not currently active".to_string()));
         }
 
-        // rollback
         self.mods.clear();
 
         self.active.store(false, Ordering::Relaxed);
         Ok(())
     }
 
-    /// Retrieve a flag determining if there is a transaction active.
     pub fn is_transaction_active(&self) -> bool {
         self.active.load(Ordering::Relaxed)
     }
 
-    /// Hit test the current transaction to see if it is currently active.
     pub fn get<St: Storable>(&self, key: &St::StorageKey) -> Option<DbRecord> {
         let bin_id = St::get_full_binary_key_id(key);
 
@@ -116,7 +98,6 @@ impl Transaction {
         out
     }
 
-    /// Set a batch of values into the cache.
     pub fn batch_set(&self, records: &[DbRecord]) {
         for record in records {
             self.mods.insert(record.get_full_binary_id(), record.clone());
@@ -125,7 +106,6 @@ impl Transaction {
         self.num_writes.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Set a value in the transaction to be committed at transaction commit time.
     pub fn set(&self, record: &DbRecord) {
         let bin_id = record.get_full_binary_id();
 
@@ -134,9 +114,6 @@ impl Transaction {
         self.num_writes.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Retrieve all the user data for a given username.
-    ///
-    /// Note: This is a FULL SCAN operation of the entire transaction log.
     pub fn get_users_data(
         &self,
         usernames: &[crate::akd::AkdLabel],
@@ -164,7 +141,6 @@ impl Transaction {
             }
         }
 
-        // sort all the value lists by epoch
         for (_k, v) in results.iter_mut() {
             v.sort_unstable_by(|a, b| a.epoch.cmp(&b.epoch));
         }
@@ -172,9 +148,6 @@ impl Transaction {
         results
     }
 
-    /// Retrieve the user state given the specified value state retrieval mode.
-    ///
-    /// Note: This is a FULL SCAN operation of the entire transaction log.
     #[allow(clippy::let_and_return)]
     pub fn get_user_state(
         &self,
@@ -190,9 +163,6 @@ impl Transaction {
         out
     }
 
-    /// Retrieve the batch of specified users user_state's based on the filtering flag provided.
-    ///
-    /// Note: This is a FULL SCAN operation of the entire transaction log.
     pub fn get_users_states(
         &self,
         usernames: &[crate::akd::AkdLabel],
@@ -211,8 +181,6 @@ impl Transaction {
         result_map
     }
 
-    /// Find the appropriate item of the cached value states for a given user. This assumes that the incoming vector
-    /// is already sorted in ascending epoch order.
     fn find_appropriate_item(
         intermediate: Vec<ValueState>,
         flag: ValueStateRetrievalFlag,
@@ -288,14 +256,12 @@ mod tests {
             let txn = Transaction::new();
             txn.begin_transaction();
 
-            // set values in a random order
             let mut shuffled = records.clone();
             shuffled.shuffle(&mut rng);
             for record in shuffled {
                 txn.set(&record);
             }
 
-            // ensure that committed records are in ascending priority
             let mut running_priority = 0;
             for record in txn.commit_transaction()? {
                 let priority = record.transaction_priority();

@@ -1,12 +1,7 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! Tests of the protobuf conversion logic
-
 use super::specs::types::*;
 use super::*;
 use crate::akd::{AzksValue, Direction};
 use rand::{Rng, rng};
-
-// ================= Test helpers ================= //
 
 fn random_hash() -> [u8; 32] {
     rng().random::<[u8; 32]>()
@@ -38,8 +33,6 @@ fn membership_proof() -> crate::akd::proofs::MembershipProof {
         }],
     }
 }
-
-// ================= Test cases ================= //
 
 #[test]
 fn test_convert_nodelabel() {

@@ -1,5 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! Contains the tests for the high-level API (directory, auditor, client)
 mod test_config_node_labels;
 mod test_core_protocol;
 mod test_errors;
@@ -15,8 +13,6 @@ use crate::{
 };
 use std::collections::HashMap;
 
-// Below contains the mock code for constructing a `MockLocalDatabase`
-
 #[allow(dead_code)]
 #[derive(Clone)]
 pub struct LocalDatabase;
@@ -25,7 +21,6 @@ unsafe impl Send for LocalDatabase {}
 
 unsafe impl Sync for LocalDatabase {}
 
-// Note that this macro produces a `MockLocalDatabase` struct
 mockall::mock! {
     pub LocalDatabase {
 
@@ -61,18 +56,15 @@ mockall::mock! {
 }
 
 fn setup_mocked_db(db: &mut MockLocalDatabase, test_db: &AsyncInMemoryDatabase) {
-    // ===== Set ===== //
     let tmp_db = test_db.clone();
     db.expect_set()
         .returning(move |record| futures::executor::block_on(tmp_db.set(record)));
 
-    // ===== Batch Set ===== //
     let tmp_db = test_db.clone();
     db.expect_batch_set().returning(move |record, other| {
         futures::executor::block_on(tmp_db.batch_set(record, other))
     });
 
-    // ===== Get ===== //
     let tmp_db = test_db.clone();
     db.expect_get::<Azks>()
         .returning(move |key| futures::executor::block_on(tmp_db.get::<Azks>(key)));
@@ -86,7 +78,6 @@ fn setup_mocked_db(db: &mut MockLocalDatabase, test_db: &AsyncInMemoryDatabase) 
     db.expect_get::<Azks>()
         .returning(move |key| futures::executor::block_on(tmp_db.get::<Azks>(key)));
 
-    // ===== Batch Get ===== //
     let tmp_db = test_db.clone();
     db.expect_batch_get::<Azks>()
         .returning(move |key| futures::executor::block_on(tmp_db.batch_get::<Azks>(key)));
@@ -96,17 +87,14 @@ fn setup_mocked_db(db: &mut MockLocalDatabase, test_db: &AsyncInMemoryDatabase) 
         futures::executor::block_on(tmp_db.batch_get::<TreeNodeWithPreviousValue>(key))
     });
 
-    // ===== Get User Data ===== //
     let tmp_db = test_db.clone();
     db.expect_get_user_data()
         .returning(move |arg| futures::executor::block_on(tmp_db.get_user_data(arg)));
 
-    // ===== Get User State ===== //
     let tmp_db = test_db.clone();
     db.expect_get_user_state()
         .returning(move |arg, flag| futures::executor::block_on(tmp_db.get_user_state(arg, flag)));
 
-    // ===== Get User State Versions ===== //
     let tmp_db = test_db.clone();
     db.expect_get_user_state_versions().returning(move |arg, flag| {
         futures::executor::block_on(tmp_db.get_user_state_versions(arg, flag))

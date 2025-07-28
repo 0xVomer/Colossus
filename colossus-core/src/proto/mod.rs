@@ -1,9 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! This module contains all the protobuf types for type conversion between internal and external
-//! types. NOTE: Protobuf encoding is NOT supported in nostd environments. The generated code is using vector
-//! too heavily to be nostd compliant
-
-// Setup the protobuf specs
 pub mod specs;
 
 #[cfg(test)]
@@ -15,12 +9,10 @@ use protobuf::MessageField;
 
 const DIRECTION_BLINDING_FACTOR: u32 = 0x000Fu32;
 
-/// An error converting a protobuf proof
 #[derive(Debug, Eq, PartialEq)]
 pub enum ConversionError {
-    /// Error deserializing from a protobuf structure/proof
     Deserialization(String),
-    /// A core protobuf error occurred
+
     Protobuf(String),
 }
 
@@ -40,11 +32,6 @@ impl core::fmt::Display for ConversionError {
     }
 }
 
-// ************************ Converter macros ************************ //
-
-// Protobuf best practice says everything should be `optional` to ensure
-// maximum backwards compatibility. This helper function ensures an optional
-// field is present in a particular interface version.
 macro_rules! require {
     ($obj:ident, $has_field:ident) => {
         if !$obj.$has_field() {
@@ -83,10 +70,6 @@ macro_rules! convert_from_vector {
     }};
 }
 
-// ==============================================================
-// NodeLabel
-// ==============================================================
-
 fn encode_minimum_label(v: &[u8; 32]) -> Vec<u8> {
     if let Some(last_non_zero) = v.iter().rposition(|b| *b != 0) {
         v[..=last_non_zero].to_vec()
@@ -95,7 +78,6 @@ fn encode_minimum_label(v: &[u8; 32]) -> Vec<u8> {
     }
 }
 
-// Assumes that the caller has checked that the input slice's length is at most 32
 fn decode_minimized_label(v: &[u8]) -> [u8; 32] {
     assert!(v.len() <= 32, "Label value is too long");
     let mut out = [0u8; 32];
@@ -136,18 +118,10 @@ impl TryFrom<&specs::types::NodeLabel> for crate::akd::NodeLabel {
             )));
         }
 
-        // Note that we do not check that the bits beyond label_len are all 0, because
-        // some labels do actually set bits beyond label_len, for example the "empty
-        // label", which is not user-supplied but instead used as a placeholder
-
         let label_val = decode_minimized_label(input_val);
         Ok(Self { label_len, label_val })
     }
 }
-
-// ==============================================================
-// Node
-// ==============================================================
 
 impl From<&crate::akd::AzksElement> for specs::types::AzksElement {
     fn from(input: &crate::akd::AzksElement) -> Self {
@@ -167,16 +141,11 @@ impl TryFrom<&specs::types::AzksElement> for crate::akd::AzksElement {
         require!(input, has_value);
         let label: crate::akd::NodeLabel = input.label.as_ref().unwrap().try_into()?;
 
-        // get the raw data & it's length, but at most crate::akd::DIGEST_BYTES bytes
         let value = hash_from_bytes!(input.value());
 
         Ok(Self { label, value: AzksValue(value) })
     }
 }
-
-// ==============================================================
-// SiblingProof
-// ==============================================================
 
 impl From<&crate::akd::proofs::SiblingProof> for specs::types::SiblingProof {
     fn from(input: &crate::akd::proofs::SiblingProof) -> Self {
@@ -197,7 +166,6 @@ impl TryFrom<&specs::types::SiblingProof> for crate::akd::proofs::SiblingProof {
         require_messagefield!(input, label);
         let label: crate::akd::NodeLabel = input.label.as_ref().unwrap().try_into()?;
 
-        // get the raw data & it's length, but at most crate::akd::DIGEST_BYTES bytes
         let siblings = input.siblings.first();
         if siblings.is_none() {
             return Err(ConversionError::Deserialization(
@@ -205,7 +173,6 @@ impl TryFrom<&specs::types::SiblingProof> for crate::akd::proofs::SiblingProof {
             ));
         }
 
-        // blind out the highest bits to all 0's, since we're pulling it down to a u8
         let direction = (input.direction() & DIRECTION_BLINDING_FACTOR) as u8;
         let bit = match direction {
             0 => Bit::Zero,
@@ -224,10 +191,6 @@ impl TryFrom<&specs::types::SiblingProof> for crate::akd::proofs::SiblingProof {
         })
     }
 }
-
-// ==============================================================
-// MembershipProof
-// ==============================================================
 
 impl From<&crate::akd::proofs::MembershipProof> for specs::types::MembershipProof {
     fn from(input: &crate::akd::proofs::MembershipProof) -> Self {
@@ -266,10 +229,6 @@ impl TryFrom<&specs::types::MembershipProof> for crate::akd::proofs::MembershipP
         })
     }
 }
-
-// ==============================================================
-// NonMembershipProof
-// ==============================================================
 
 impl From<&crate::akd::proofs::NonMembershipProof> for specs::types::NonMembershipProof {
     fn from(input: &crate::akd::proofs::NonMembershipProof) -> Self {
@@ -321,10 +280,6 @@ impl TryFrom<&specs::types::NonMembershipProof> for crate::akd::proofs::NonMembe
     }
 }
 
-// ==============================================================
-// LookupProof
-// ==============================================================
-
 impl From<&crate::akd::proofs::LookupProof> for specs::types::LookupProof {
     fn from(input: &crate::akd::proofs::LookupProof) -> Self {
         Self {
@@ -373,10 +328,6 @@ impl TryFrom<&specs::types::LookupProof> for crate::akd::proofs::LookupProof {
     }
 }
 
-// ==============================================================
-// UpdateProof
-// ==============================================================
-
 impl From<&crate::akd::proofs::UpdateProof> for specs::types::UpdateProof {
     fn from(input: &crate::akd::proofs::UpdateProof) -> Self {
         Self {
@@ -422,10 +373,6 @@ impl TryFrom<&specs::types::UpdateProof> for crate::akd::proofs::UpdateProof {
         })
     }
 }
-
-// ==============================================================
-// HistoryProof
-// ==============================================================
 
 impl From<&crate::akd::proofs::HistoryProof> for specs::types::HistoryProof {
     fn from(input: &crate::akd::proofs::HistoryProof) -> Self {
@@ -485,10 +432,6 @@ impl TryFrom<&specs::types::HistoryProof> for crate::akd::proofs::HistoryProof {
     }
 }
 
-// ==============================================================
-// SingleAppendOnlyProof
-// ==============================================================
-
 impl From<&crate::akd::proofs::SingleAppendOnlyProof> for specs::types::SingleAppendOnlyProof {
     fn from(input: &crate::akd::proofs::SingleAppendOnlyProof) -> Self {
         Self {
@@ -512,10 +455,6 @@ impl TryFrom<&specs::types::SingleAppendOnlyProof> for crate::akd::proofs::Singl
         Ok(Self { inserted, unchanged_nodes })
     }
 }
-
-// ==============================================================
-// SingleAppendOnlyProof
-// ==============================================================
 
 impl From<&crate::akd::proofs::AppendOnlyProof> for specs::types::AppendOnlyProof {
     fn from(input: &crate::akd::proofs::AppendOnlyProof) -> Self {

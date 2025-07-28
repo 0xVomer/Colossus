@@ -1,5 +1,3 @@
-//! Caching tests
-
 use super::*;
 use std::time::Duration;
 
@@ -77,11 +75,8 @@ async fn test_cache_memory_pressure() {
     let key = ValueStateKey(AkdLabel::from("user").0.to_vec(), 1);
     cache.put(&value_state).await;
 
-    // we only do an "automated" clean every 50ms in test, which is when memory pressure is evaluated.
-    // 100ms will make sure the clean op will run on the next `hit_test` op
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    // This get should return none, even though the cache expiration time is 1s. This is because
-    // we should exceed 10 bytes of storage utilization so the cache should clean the item.
+
     let got = cache.hit_test::<ValueState>(&key).await;
     assert_eq!(None, got);
 }
@@ -107,8 +102,6 @@ async fn test_many_memory_pressure() {
 
     cache.batch_put(&value_states).await;
 
-    // we only do an "automated" clean every 50ms in test, which is when memory pressure is evaluated.
-    // 100ms will make sure the clean op will run on the next `hit_test` op
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     let all = cache.get_all().await;

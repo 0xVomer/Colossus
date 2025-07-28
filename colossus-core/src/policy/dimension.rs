@@ -6,8 +6,6 @@ use std::{
     ops::BitOr,
 };
 
-/// Whether to provide an encryption key in the master public key for this
-/// attribute.
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AttributeStatus {
     EncryptDecrypt,
@@ -55,7 +53,6 @@ impl Attribute {
     }
 }
 
-/// A dimension is an object that contains attributes. It can be ordered or unordered.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub enum Dimension {
     Anarchy(HashMap<ATTRIBUTE, Attribute>),
@@ -83,10 +80,6 @@ impl Dimension {
         }
     }
 
-    /// Returns an iterator over the attributes name.
-    ///
-    /// If the dimension is ordered, the names are returned in this order, otherwise they are
-    /// returned in arbitrary order.
     pub fn get_attributes_name(&self) -> Box<dyn '_ + Iterator<Item = &ATTRIBUTE>> {
         match self {
             Self::Anarchy(attributes) => Box::new(attributes.keys()),
@@ -103,7 +96,6 @@ impl Dimension {
 }
 
 impl Dimension {
-    /// Restricts the dimension to the attribute that are lower than the given one.
     pub fn restrict(&self, attr: &ATTRIBUTE) -> Result<Self, Error> {
         let params = self
             .get_attribute(attr)
@@ -124,10 +116,6 @@ impl Dimension {
         }
     }
 
-    /// Adds a new attribute to this dimension with the provided properties.
-    ///
-    /// # Errors
-    /// Returns an error if the operation is not permitted.
     pub fn add_attribute(
         &mut self,
         attribute: ATTRIBUTE,
@@ -182,10 +170,6 @@ impl Dimension {
         }
     }
 
-    /// Removes the attribute with the given name from this dimension.
-    ///
-    /// # Errors
-    /// Returns an error if no attribute with this name is found.
     pub fn remove_attribute(&mut self, attr: &ATTRIBUTE) -> Result<(), Error> {
         match self {
             Self::Anarchy(attributes) => attributes
@@ -199,10 +183,6 @@ impl Dimension {
         }
     }
 
-    /// Disables the attribute with the given name.
-    ///
-    /// # Errors
-    /// Returns an error if no attribute with this name is found.
     pub fn disable_attribute(&mut self, attr: &ATTRIBUTE) -> Result<(), Error> {
         match self {
             Self::Anarchy(attributes) => attributes
@@ -216,11 +196,6 @@ impl Dimension {
         }
     }
 
-    /// Update the attribute with the given diegest.
-    ///
-    /// # Errors
-    /// Returns an error if the new digest is already used in the same dimension or if no attribute
-    /// with the given old digest is found.
     pub fn update_attribute(
         &mut self,
         old_digest: &ATTRIBUTE,
@@ -247,8 +222,6 @@ impl Dimension {
         }
     }
 
-    /// Returns an iterator over the `AttributesParameters` and parameters.
-    /// If the dimension is ordered, the attributes are returned in order.
     pub fn attributes(&self) -> Box<dyn '_ + Iterator<Item = &Attribute>> {
         match self {
             Self::Anarchy(attributes) => Box::new(attributes.values()),

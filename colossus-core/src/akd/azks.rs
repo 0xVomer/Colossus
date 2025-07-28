@@ -1,6 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! An implementation of an append-only zero knowledge set
-
 mod element;
 mod element_set;
 mod parallelism;
@@ -38,10 +35,7 @@ use element_set::AzksElementSet;
 pub use parallelism::{AzksParallelismConfig, AzksParallelismOption};
 use serde::{Deserialize, Serialize};
 use std::{marker::Sync, sync::Arc};
-// #[cfg(feature = "greedy_lookup_preload")]
-// use std::collections::HashSet;
-//
-/// The default azks key
+
 pub const DEFAULT_AZKS_KEY: u8 = 1u8;
 
 async fn tic_toc<T>(f: impl core::future::Future<Output = T>) -> (T, Option<f64>) {
@@ -51,15 +45,10 @@ async fn tic_toc<T>(f: impl core::future::Future<Output = T>) -> (T, Option<f64>
     (out, Some(toc.as_secs_f64()))
 }
 
-/// An azks is built both by the [crate::directory::Directory] and the auditor.
-/// However, both constructions have very minor differences, and the insert
-/// mode enum is used to differentiate between the two.
 #[derive(Debug, Clone, Copy)]
 pub enum InsertMode {
-    /// The regular construction of the the tree.
     Directory,
-    /// The auditor's mode of constructing the tree - last epochs of leaves are
-    /// not included in node hashes.
+
     Auditor,
 }
 
@@ -74,14 +63,11 @@ impl From<InsertMode> for NodeHashingMode {
 
 type AppendOnlyHelper = (Vec<AzksElement>, Vec<AzksElement>);
 
-/// An append-only zero knowledge set, the data structure used to efficiently implement
-/// a auditable key directory.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(bound = "")]
 pub struct Azks {
-    /// The latest complete epoch
     pub latest_epoch: u64,
-    /// The number of nodes is the total size of this tree
+
     pub num_nodes: u64,
 }
 
@@ -117,7 +103,6 @@ impl Storable for Azks {
 unsafe impl Sync for Azks {}
 
 impl Azks {
-    /// Creates a new azks
     pub async fn new<TC: Configuration, S: Database>(
         storage: &StorageManager<S>,
     ) -> Result<Self, AkdError> {
@@ -129,7 +114,6 @@ impl Azks {
         Ok(azks)
     }
 
-    /// Insert a batch of new leaves.
     pub async fn batch_insert_nodes<TC: Configuration, S: Database + 'static>(
         &mut self,
         storage: &StorageManager<S>,
@@ -139,7 +123,6 @@ impl Azks {
     ) -> Result<(), AkdError> {
         let azks_element_set = AzksElementSet::from(nodes);
 
-        // preload the nodes that we will visit during the insertion
         let (fallible_load_count, time_s) =
             tic_toc(self.preload_nodes(storage, &azks_element_set, parallelism_config)).await;
         let load_count = fallible_load_count?;
@@ -149,11 +132,9 @@ impl Azks {
             info!("Preload of nodes for insert ({} objects loaded) completed.", load_count);
         }
 
-        // increment the current epoch
         self.increment_epoch();
 
         if !azks_element_set.is_empty() {
-            // call recursive batch insert on the root
             let (root_node, is_new, num_inserted) = Self::recursive_batch_insert_nodes::<TC, _>(
                 storage,
                 Some(NodeLabel::root()),
@@ -165,7 +146,6 @@ impl Azks {
             .await?;
             root_node.write_to_storage(storage, is_new).await?;
 
-            // update the number of nodes
             self.num_nodes += num_inserted;
 
             info!("Batch insert completed ({} new nodes)", num_inserted);
@@ -174,11 +154,6 @@ impl Azks {
         Ok(())
     }
 
-    /// Inserts a batch of leaves recursively from a given node label. Note: it
-    /// is the caller's responsibility to write the returned node to storage.
-    /// This is done so that the caller may set the 'parent' field of a node
-    /// before it is written to storage. The is_new flag indicates whether the
-    /// returned node is new or not.
     #[async_recursion]
     #[allow(clippy::multiple_bound_locations)]
     pub(crate) async fn recursive_batch_insert_nodes<TC: Configuration, S: Database + 'static>(
@@ -189,56 +164,35 @@ impl Azks {
         insert_mode: InsertMode,
         parallel_levels: Option<u8>,
     ) -> Result<(TreeNode, bool, u64), AkdError> {
-        // Phase 1: Obtain the current root node of this subtree. If the node is
-        // new, mark it as so and count it towards the number of inserted nodes.
         let mut current_node;
         let is_new;
         let mut num_inserted;
 
         match (node_label, &azks_element_set[..]) {
             (Some(node_label), _) => {
-                // Case 1: The node label is not None, meaning that there was an
-                // existing node at this level of the tree.
                 let mut existing_node =
                     TreeNode::get_from_storage(storage, &NodeKey(node_label), epoch).await?;
 
-                // compute the longest common prefix between all nodes in the
-                // node set and the current node, and check if new nodes
-                // have a longest common prefix shorter than the current node.
                 let set_lcp_label = azks_element_set.get_longest_common_prefix::<TC>();
                 let lcp_label = node_label.get_longest_common_prefix::<TC>(set_lcp_label);
                 if lcp_label.get_len() < node_label.get_len() {
-                    // Case 1a: The existing node needs to be decompressed, by
-                    // pushing it down one level (away from root) in the tree
-                    // and replacing it with a new node whose label is equal to
-                    // the longest common prefix.
                     current_node = new_interior_node::<TC>(lcp_label, epoch);
                     current_node.set_child(&mut existing_node)?;
                     existing_node.write_to_storage(storage, false).await?;
                     is_new = true;
                     num_inserted = 1;
                 } else {
-                    // Case 1b: The existing node does not need to be
-                    // decompressed as its label is longer than or equal to the
-                    // longest common prefix of the node set.
                     current_node = existing_node;
                     is_new = false;
                     num_inserted = 0;
                 }
             },
             (None, [node]) => {
-                // Case 2: The node label is None and the node set has a
-                // single element, meaning that a new leaf node should be
-                // created to represent the element.
                 current_node = new_leaf_node::<TC>(node.label, &node.value, epoch);
                 is_new = true;
                 num_inserted = 1;
             },
             (None, _) => {
-                // Case 3: The node label is None and the insertion still has
-                // multiple elements, meaning that a new interior node should be
-                // created with a label equal to the longest common prefix of
-                // the node set.
                 let lcp_label = azks_element_set.get_longest_common_prefix::<TC>();
                 current_node = new_interior_node::<TC>(lcp_label, epoch);
                 is_new = true;
@@ -246,16 +200,11 @@ impl Azks {
             },
         }
 
-        // Phase 2: Partition the node set based on the direction the leaf
-        // nodes are located in with respect to the current node and call this
-        // function recursively on the left and right child nodes. The current
-        // node is updated with the new child nodes.
         let (left_azks_element_set, right_azks_element_set) =
             azks_element_set.partition(current_node.label);
         let child_parallel_levels =
             parallel_levels.and_then(|x| if x <= 1 { None } else { Some(x - 1) });
 
-        // handle the left child
         let maybe_handle = if !left_azks_element_set.is_empty() {
             let storage_clone = storage.clone();
             let left_child_label = current_node.get_child_label(Direction::Left);
@@ -272,11 +221,8 @@ impl Azks {
             };
 
             if parallel_levels.is_some() {
-                // spawn a task and return the handle if there are still levels
-                // to be processed in parallel
                 Some(tokio::task::spawn(left_future))
             } else {
-                // else handle the left child in the current task
                 let (mut left_node, left_is_new, left_num_inserted) = left_future.await?;
 
                 current_node.set_child(&mut left_node)?;
@@ -288,7 +234,6 @@ impl Azks {
             None
         };
 
-        // handle the right child in the current task
         if !right_azks_element_set.is_empty() {
             let right_child_label = current_node.get_child_label(Direction::Right);
             let (mut right_node, right_is_new, right_num_inserted) =
@@ -307,7 +252,6 @@ impl Azks {
             num_inserted += right_num_inserted;
         }
 
-        // join on the handle for the left child, if present
         if let Some(handle) = maybe_handle {
             let (mut left_node, left_is_new, left_num_inserted) = handle
                 .await
@@ -317,8 +261,6 @@ impl Azks {
             num_inserted += left_num_inserted;
         }
 
-        // Phase 3: Update the hash of the current node and return it along with
-        // the number of nodes inserted.
         current_node
             .update_hash::<TC, _>(storage, NodeHashingMode::from(insert_mode))
             .await?;
@@ -326,133 +268,12 @@ impl Azks {
         Ok((current_node, is_new, num_inserted))
     }
 
-    // #[cfg(feature = "greedy_lookup_preload")]
-    // async fn get_next_node_in_child_path_from_cache<S: Database + Send + Sync>(
-    //     &self,
-    //     storage: &StorageManager<S>,
-    //     node: &TreeNode,
-    //     target: &NodeLabel,
-    // ) -> Option<TreeNode> {
-    //     match (node.left_child, node.right_child) {
-    //         (Some(l), _) if l.is_prefix_of(target) => {
-    //             match storage
-    //                 .get_from_cache_only::<crate::tree_node::TreeNodeWithPreviousValue>(&NodeKey(l))
-    //                 .await
-    //             {
-    //                 Some(crate::storage::types::DbRecord::TreeNode(tnpv)) => {
-    //                     tnpv.determine_node_to_get(self.latest_epoch).ok()
-    //                 },
-    //                 _ => None,
-    //             }
-    //         },
-    //         (_, Some(r)) if r.is_prefix_of(target) => {
-    //             match storage
-    //                 .get_from_cache_only::<crate::tree_node::TreeNodeWithPreviousValue>(&NodeKey(r))
-    //                 .await
-    //             {
-    //                 Some(crate::storage::types::DbRecord::TreeNode(tnpv)) => {
-    //                     tnpv.determine_node_to_get(self.latest_epoch).ok()
-    //                 },
-    //                 _ => None,
-    //             }
-    //         },
-    //         _ => None,
-    //     }
-    // }
-
-    /// Builds all the POSSIBLE paths along the route from root node to
-    /// leaf node. This will be grossly over-estimating the true size of the
-    /// tree and the number of nodes required to be fetched, however
-    /// it allows a single batch-get call in necessary scenarios
-    // #[cfg(feature = "greedy_lookup_preload")]
-    // pub(crate) async fn build_lookup_maximal_node_set<S: Database + Send + Sync>(
-    //     &self,
-    //     storage: &StorageManager<S>,
-    //     li: LookupInfo,
-    // ) -> Result<HashSet<NodeLabel>, AkdError> {
-    //     let mut results = HashSet::new();
-    //     let labels = [li.existent_label, li.marker_label, li.non_existent_label];
-
-    //     let root_node: TreeNode =
-    //         TreeNode::get_from_storage(storage, &NodeKey(NodeLabel::root()), self.latest_epoch)
-    //             .await?;
-
-    //     for label in labels {
-    //         let mut cnode = root_node.clone();
-    //         // walk through the cache to find the next node in the tree which isn't already loaded
-    //         while let Some(node) =
-    //             self.get_next_node_in_child_path_from_cache(storage, &cnode, &label).await
-    //         {
-    //             cnode = node;
-    //         }
-    //         // load the rest of the nodes in the path, as soon as a child node can't be resolved. In the worst-case
-    //         // this is loading every possible node on the path (i.e. uninitialized cache)
-    //         for len in cnode.label.label_len..256 {
-    //             results.insert(label.get_prefix(len));
-    //         }
-    //     }
-
-    //     Ok(results)
-    // }
-
-    /// Preload for a single lookup operation by loading all the nodes along
-    /// the direct path, and the children of resolved nodes on the path. This
-    /// minimizes the number of batch_get operations to the storage layer which are
-    /// called
-    // #[cfg(feature = "greedy_lookup_preload")]
-    // pub(crate) async fn greedy_preload_lookup_nodes<S: Database + Send + Sync>(
-    //     &self,
-    //     storage: &StorageManager<S>,
-    //     lookup_info: LookupInfo,
-    // ) -> Result<u64, AkdError> {
-    //     let mut count = 0u64;
-    //     let mut requested_count = 0u64;
-
-    //     // First try and load ALL possible nodes on the direct paths between the root and the target labels
-    //     // For a lookup proof, there's 3 targets
-    //     //
-    //     // * existent_label
-    //     // * marker_label
-    //     // * non_existent_label
-    //     let nodes = self
-    //         .build_lookup_maximal_node_set(storage, lookup_info)
-    //         .await?
-    //         .into_iter()
-    //         .map(NodeKey)
-    //         .collect::<Vec<_>>();
-    //     requested_count += nodes.len() as u64;
-
-    //     let nodes = TreeNode::batch_get_from_storage(storage, &nodes, self.latest_epoch).await?;
-    //     count += nodes.len() as u64;
-
-    //     // Now load the children of the nodes resolved on the direct path, which
-    //     // for non-already-loaded children will be the siblings necessary to
-    //     // generate the required proof structs.
-    //     let children = nodes
-    //         .into_iter()
-    //         .flat_map(|node| match (node.left_child, node.right_child) {
-    //             (Some(l), Some(r)) => vec![NodeKey(l), NodeKey(r)],
-    //             _ => vec![],
-    //         })
-    //         .collect::<Vec<_>>();
-    //     requested_count += children.len() as u64;
-
-    //     let children =
-    //         TreeNode::batch_get_from_storage(storage, &children, self.latest_epoch).await?;
-    //     count += children.len() as u64;
-
-    //     log::info!("Greedy lookup proof preloading loaded {} of {} nodes", count, requested_count);
-
-    //     Ok(count)
-    // }
-
     pub(crate) async fn preload_lookup_nodes<S: Database + Send + Sync + 'static>(
         &self,
         storage: &StorageManager<S>,
         lookup_infos: &[LookupInfo],
         marker_labels: Option<Vec<NodeLabel>>,
     ) -> Result<u64, AkdError> {
-        // Collect lookup labels needed and convert them into Nodes for preloading.
         let lookup_nodes: Vec<AzksElement> = lookup_infos
             .iter()
             .flat_map(|li| vec![li.existent_label, li.marker_label, li.non_existent_label])
@@ -460,8 +281,6 @@ impl Azks {
             .map(|l| AzksElement { label: l, value: AzksValue(EMPTY_DIGEST) })
             .collect();
 
-        // Load nodes without parallelism, since multiple lookups could be
-        // happening and parallelism might consume too many resources.
         self.preload_nodes(
             storage,
             &AzksElementSet::from(lookup_nodes),
@@ -470,7 +289,6 @@ impl Azks {
         .await
     }
 
-    /// Preloads given nodes using breadth-first search.
     pub(crate) async fn preload_nodes<S: Database + 'static>(
         &self,
         storage: &StorageManager<S>,
@@ -482,11 +300,6 @@ impl Azks {
             return Ok(0);
         }
 
-        // We clone and wrap AzksElementSet in an Arc so that it can be passed
-        // to another tokio task safely. The element set does not even need to
-        // be cloned, since preloading never modifies it. However, a clone helps
-        // avoid propagating the responsibility of creating an Arc to the caller.
-        // We can consider doing away with it in future.
         let azks_element_set = Arc::new(azks_element_set.clone());
         let epoch = self.get_latest_epoch();
         let node_keys = vec![NodeKey(NodeLabel::root())];
@@ -522,9 +335,6 @@ impl Azks {
         let nodes = TreeNode::batch_get_from_storage(storage, &node_keys, epoch).await?;
         let mut load_count = node_keys.len() as u64;
 
-        // Now that states are loaded in the cache, we can read and access them.
-        // Note, we perform directional loads to avoid accessing remote storage
-        // individually for each node's state.
         let mut next_nodes: Vec<NodeKey> = nodes
             .iter()
             .filter(|node| azks_element_set.contains_prefix(&node.label))
@@ -537,13 +347,11 @@ impl Azks {
             .collect();
 
         if parallel_levels.is_some() {
-            // Divide work into two equivalent chunks.
             let right_next_nodes = next_nodes.split_off(next_nodes.len() / 2);
             let left_next_nodes = next_nodes;
             let child_parallel_levels =
                 parallel_levels.and_then(|x| if x <= 1 { None } else { Some(x - 1) });
 
-            // Handle the left chunk in a different tokio task.
             let storage_clone = storage.clone();
             let azks_element_set_clone = azks_element_set.clone();
             let left_future = async move {
@@ -558,7 +366,6 @@ impl Azks {
             };
             let handle = tokio::task::spawn(left_future);
 
-            // Handle the right chunk in the current task.
             let right_load_count = Azks::recursive_preload_nodes(
                 storage,
                 azks_element_set,
@@ -569,13 +376,11 @@ impl Azks {
             .await?;
             load_count += right_load_count;
 
-            // Join on the handle for the left chunk.
             let left_load_count = handle
                 .await
                 .map_err(|e| AkdError::Parallelism(ParallelismError::JoinErr(e.to_string())))??;
             load_count += left_load_count;
         } else {
-            // Perform all the work in the current task.
             let next_load_count = Azks::recursive_preload_nodes(
                 storage,
                 azks_element_set,
@@ -590,8 +395,6 @@ impl Azks {
         Ok(load_count)
     }
 
-    /// Returns the Merkle membership proof for the trie as it stood at epoch
-    // Assumes the verifier has access to the root at epoch
     #[tracing::instrument(skip_all)]
     pub async fn get_membership_proof<TC: Configuration, S: Database>(
         &self,
@@ -603,9 +406,6 @@ impl Azks {
         Ok(proof)
     }
 
-    /// In a compressed trie, the proof consists of the longest prefix
-    /// of the label that is included in the trie, as well as its children, to show that
-    /// none of the children is equal to the given label.
     #[tracing::instrument(skip_all)]
     pub async fn get_non_membership_proof<TC: Configuration, S: Database>(
         &self,
@@ -656,15 +456,6 @@ impl Azks {
         })
     }
 
-    /// An append-only proof for going from `start_epoch` to `end_epoch` consists of roots of subtrees
-    /// the azks tree that remain unchanged from `start_epoch` to `end_epoch` and the leaves inserted into the
-    /// tree after `start_epoch` and  up until `end_epoch`.
-    /// If there is no errors, this function returns an `Ok` result, containing the
-    ///  append-only proof and otherwise, it returns an [AkdError].
-    ///
-    /// **RESTRICTIONS**: Note that `start_epoch` and `end_epoch` are valid only when the following are true
-    /// * `start_epoch` <= `end_epoch`
-    /// * `start_epoch` and `end_epoch` are both existing epochs of this AZKS
     #[tracing::instrument(skip_all)]
     pub async fn get_append_only_proof<TC: Configuration, S: Database + 'static>(
         &self,
@@ -683,9 +474,7 @@ impl Azks {
 
         let mut proofs = Vec::<SingleAppendOnlyProof>::new();
         let mut epochs = Vec::<u64>::new();
-        // Suppose the epochs start_epoch and end_epoch exist in the set.
-        // This function should return the proof that nothing was removed/changed from the tree
-        // between these epochs.
+
         let (fallible_load_count, time_s) = tic_toc(self.preload_audit_nodes::<_>(
             storage,
             latest_epoch,
@@ -789,13 +578,11 @@ impl Azks {
             .collect();
 
         if parallel_levels.is_some() {
-            // Divide work into two equivalent chunks.
             let right_next_nodes = next_nodes.split_off(next_nodes.len() / 2);
             let left_next_nodes = next_nodes;
             let child_parallel_levels =
                 parallel_levels.and_then(|x| if x <= 1 { None } else { Some(x - 1) });
 
-            // Handle the left chunk in a different tokio task.
             let storage_clone = storage.clone();
             let left_future = async move {
                 Azks::recursive_preload_audit_nodes(
@@ -810,7 +597,6 @@ impl Azks {
             };
             let handle = tokio::task::spawn(left_future);
 
-            // Handle the right chunk in the current task.
             let right_load_count = Azks::recursive_preload_audit_nodes(
                 storage,
                 right_next_nodes,
@@ -822,13 +608,11 @@ impl Azks {
             .await?;
             load_count += right_load_count;
 
-            // Join on the handle for the left chunk.
             let left_load_count = handle
                 .await
                 .map_err(|e| AkdError::Parallelism(ParallelismError::JoinErr(e.to_string())))??;
             load_count += left_load_count;
         } else {
-            // Perform all the work in the current task.
             let next_load_count = Azks::recursive_preload_audit_nodes(
                 storage,
                 next_nodes,
@@ -861,7 +645,6 @@ impl Azks {
 
         if node.get_latest_epoch() <= start_epoch {
             if node.node_type == TreeNodeType::Root {
-                // this is the case where the root is unchanged since the last epoch
                 return Ok((unchanged, leaves));
             }
             unchanged.push(AzksElement {
@@ -883,7 +666,6 @@ impl Azks {
                 tokio::task::JoinHandle<Result<(Vec<AzksElement>, Vec<AzksElement>), AkdError>>,
             > = if let Some(left_child) = node.left_child {
                 if parallel_levels.map(|p| p as u64 > level).unwrap_or(false) {
-                    // we can parallelise further!
                     let storage_clone = storage.clone();
                     let tsk: tokio::task::JoinHandle<Result<_, AkdError>> =
                         tokio::spawn(async move {
@@ -908,7 +690,6 @@ impl Azks {
 
                     Some(tsk)
                 } else {
-                    // Enough parallelism already, STOP IT! Don't make me get the belt!
                     let child_node =
                         TreeNode::get_from_storage(storage, &NodeKey(left_child), latest_epoch)
                             .await?;
@@ -961,7 +742,6 @@ impl Azks {
         Ok((unchanged, leaves))
     }
 
-    /// Gets the root hash for this azks
     #[tracing::instrument(skip_all)]
     pub async fn get_root_hash<TC: Configuration, S: Database>(
         &self,
@@ -970,8 +750,6 @@ impl Azks {
         self.get_root_hash_safe::<TC, _>(storage, self.get_latest_epoch()).await
     }
 
-    /// Gets the root hash of the tree at the latest epoch if the passed epoch
-    /// is equal to the latest epoch. Will return an error otherwise.
     #[tracing::instrument(skip_all)]
     pub(crate) async fn get_root_hash_safe<TC: Configuration, S: Database>(
         &self,
@@ -979,7 +757,6 @@ impl Azks {
         epoch: u64,
     ) -> Result<Digest, AkdError> {
         if self.latest_epoch != epoch {
-            // cannot retrieve information for non-latest epoch
             return Err(AkdError::Directory(DirectoryError::InvalidEpoch(format!(
                 "Passed epoch ({}) was not the latest epoch ({}).",
                 epoch, self.latest_epoch
@@ -991,8 +768,6 @@ impl Azks {
         Ok(TC::compute_root_hash_from_val(&root_node.hash))
     }
 
-    /// Gets the latest epoch of this azks. If an update aka epoch transition
-    /// is in progress, this should return the most recent completed epoch.
     pub fn get_latest_epoch(&self) -> u64 {
         self.latest_epoch
     }
@@ -1002,7 +777,6 @@ impl Azks {
         self.latest_epoch = epoch;
     }
 
-    /// Gets the sibling node of the passed node's child in the "opposite" of the passed direction.
     async fn get_child_azks_element_in_dir<TC: Configuration, S: Database>(
         &self,
         storage: &StorageManager<S>,
@@ -1010,7 +784,6 @@ impl Azks {
         dir: Direction,
         latest_epoch: u64,
     ) -> Result<AzksElement, AkdError> {
-        // Find the sibling in the "other" direction
         let sibling = curr_node.get_child_node(storage, dir, latest_epoch).await?;
         Ok(AzksElement {
             label: node_to_label::<TC>(&sibling),
@@ -1018,9 +791,6 @@ impl Azks {
         })
     }
 
-    /// This function returns the node label for the node whose label is the longest common
-    /// prefix for the queried label. It also returns a membership proof for said label.
-    /// This is meant to be used in both getting membership proofs and getting non-membership proofs.
     async fn get_lcp_node_label_with_membership_proof<TC: Configuration, S: Database>(
         &self,
         storage: &StorageManager<S>,
@@ -1029,7 +799,6 @@ impl Azks {
         let mut sibling_proofs = Vec::new();
         let latest_epoch = self.get_latest_epoch();
 
-        // Perform a traversal from the root to the node corresponding to the queried label
         let mut curr_node =
             TreeNode::get_from_storage(storage, &NodeKey(NodeLabel::root()), latest_epoch).await?;
 
@@ -1042,12 +811,9 @@ impl Azks {
             })?;
             let child = curr_node.get_child_node(storage, direction, latest_epoch).await?;
             if child.is_none() {
-                // Special case, if the root node has a direction with no child there
                 break;
             }
 
-            // Find the sibling node. Note that for ARITY = 2, this does not need to be
-            // an array, as it can just be a single node.
             let child_azks_element = self
                 .get_child_azks_element_in_dir::<TC, _>(
                     storage,

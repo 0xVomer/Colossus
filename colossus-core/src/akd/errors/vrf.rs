@@ -1,11 +1,9 @@
-/// A error related to verifiable random functions
 #[derive(Debug, Eq, PartialEq)]
 pub enum VrfError {
-    /// A problem retrieving or decoding the VRF public key
     PublicKey(String),
-    /// A problem retrieving or decoding the VRF signing key
+
     SigningKey(String),
-    /// A problem verifying the VRF proof
+
     Verification(String),
 }
 

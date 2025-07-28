@@ -302,7 +302,6 @@ impl RootAuthority {
             let S_ij = xor_in_place(H_hash(K1, K2.as_ref(), &T)?, F);
             let (tag_ij, ss) = J_hash(&S_ij, &U);
             if cap.tag == tag_ij {
-                // Fujisaki-Okamoto
                 let r = G_hash(&S_ij)?;
                 let c_ij = self.set_traps(&r);
                 if cap.c == c_ij {
@@ -401,7 +400,6 @@ impl RootAuthority {
 
     fn generate_user_id(&mut self, rng: &mut impl CryptoRngCore) -> Result<UserId, Error> {
         if let Some((last_tracer, _)) = self.tracers.back() {
-            // Generate all but the last marker at random.
             let mut markers = self
                 .tracers
                 .iter()
@@ -783,7 +781,6 @@ impl UserSecretKey {
                     let S_ij = xor_in_place(H_hash(&K1, Some(&K2), &T)?, F);
                     let (tag_ij, ss) = J_hash(&S_ij, &U);
                     if &cap.tag == &tag_ij {
-                        // Fujisaki-Okamoto
                         let r = G_hash(&S_ij)?;
                         let c_ij = self.set_traps(&r);
                         if cap.c == c_ij {
@@ -882,7 +879,6 @@ pub fn usk_keygen(
     auth: &mut RootAuthority,
     coordinates: HashSet<Right>,
 ) -> Result<UserSecretKey, Error> {
-    // Extract keys first to avoid unnecessary computation in case those cannot be found.
     let coordinate_keys = auth
         .get_latest_access_right_sk(coordinates.into_iter())
         .collect::<Result<RevisionVec<_, _>, Error>>()?;
@@ -1010,7 +1006,6 @@ pub fn refresh_usk(
 }
 
 impl UserId {
-    /// Returns the tracing level of the USK.
     pub(crate) fn tracing_level(&self) -> usize {
         self.0.len() - 1
     }
@@ -1199,7 +1194,6 @@ mod test {
         let (old_key_1, old_enc_1) = rpk.encapsulate(&mut rng, &subspace_1).unwrap();
         let (old_key_2, old_enc_2) = rpk.encapsulate(&mut rng, &subspace_2).unwrap();
 
-        // Old USK can open encapsulations associated with their coordinate.
         assert_eq!(Some(&old_key_1), usk_1.decapsulate(&mut rng, &old_enc_1).unwrap().as_ref());
         assert_eq!(None, usk_1.decapsulate(&mut rng, &old_enc_2).unwrap());
         assert_eq!(Some(old_key_2), usk_2.decapsulate(&mut rng, &old_enc_2).unwrap());

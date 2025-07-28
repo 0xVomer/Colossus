@@ -1,7 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! This module contains common test utilities for crates generating tests utilizing the
-//! AKD crate
-
 use colored::*;
 use log::{Level, Metadata, Record};
 use once_cell::sync::OnceCell;
@@ -75,24 +71,16 @@ impl log::Log for TestConsoleLogger {
     fn flush(&self) {}
 }
 
-/// Initialize the logger for console logging within test environments.
-/// This is safe to call multiple times, but it will only initialize the logger
-/// to the log-level _first_ set. If you want a specific log-level (e.g. Debug)
-/// for a specific test, make sure to only run that single test after editing that
-/// test's log-level.
-///
-/// The default level applied everywhere is Info
 pub fn init_logger(level: Level) {
     EPOCH.get_or_init(Instant::now);
 
     INIT_ONCE.call_once(|| {
-        log::set_logger(&LOGGER).map(|()| log::set_max_level(level.to_level_filter())).unwrap();
+        log::set_logger(&LOGGER)
+            .map(|()| log::set_max_level(level.to_level_filter()))
+            .unwrap();
     });
 }
 
-/// Global test startup constructor. Only runs in the TEST profile. Each
-/// crate which wants logging enabled in tests being run should make this call
-/// itself.
 #[cfg(test)]
 #[ctor::ctor]
 fn test_start() {

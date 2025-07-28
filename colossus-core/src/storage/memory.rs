@@ -1,8 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! This module contains an in-memory database for the AKD library as well as
-//! an in-memory implementation which contains some caching implementations for
-//! benchmarking
-
 use super::{
     traits::{Database, Storable, StorageUtil},
     types::{DbRecord, KeyData, StorageType, ValueState, ValueStateKey, ValueStateRetrievalFlag},
@@ -15,9 +10,6 @@ use std::{collections::HashMap, sync::Arc};
 type Epoch = u64;
 type UserValueMap = HashMap<Epoch, ValueState>;
 
-// ===== Basic In-Memory database ==== //
-
-/// This struct represents a basic in-memory database.
 #[derive(Default, Clone, Debug)]
 pub struct AsyncInMemoryDatabase {
     db: Arc<DashMap<Vec<u8>, DbRecord>>,
@@ -28,7 +20,6 @@ unsafe impl Send for AsyncInMemoryDatabase {}
 unsafe impl Sync for AsyncInMemoryDatabase {}
 
 impl AsyncInMemoryDatabase {
-    /// Creates a new in memory db
     pub fn new() -> Self {
         Self::default()
     }
@@ -44,7 +35,7 @@ impl AsyncInMemoryDatabase {
         id: &St::StorageKey,
     ) -> Result<DbRecord, StorageError> {
         let bin_id = St::get_full_binary_key_id(id);
-        // if the request is for a value state, look in the value state set
+
         if St::data_type() == StorageType::ValueState {
             if let Ok(ValueStateKey(username, epoch)) = ValueState::key_from_full_binary(&bin_id) {
                 if let Some(state) = self.user_info.get(&username) {
@@ -55,7 +46,7 @@ impl AsyncInMemoryDatabase {
                 return Err(StorageError::NotFound(format!("ValueState {id:?}")));
             }
         }
-        // fallback to regular get/set db
+
         if let Some(result) = self.db.get(&bin_id) {
             Ok(result.clone())
         } else {
@@ -95,37 +86,27 @@ impl Database for AsyncInMemoryDatabase {
         Ok(())
     }
 
-    /// Retrieve a stored record from the data layer
     async fn get<St: Storable>(&self, id: &St::StorageKey) -> Result<DbRecord, StorageError> {
-        // #[cfg(feature = "slow_internal_db")]
-        // tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
         self.get_internal::<St>(id).await
     }
 
-    /// Retrieve a batch of records by id
     async fn batch_get<St: Storable>(
         &self,
         ids: &[St::StorageKey],
     ) -> Result<Vec<DbRecord>, StorageError> {
-        // #[cfg(feature = "slow_internal_db")]
-        // tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
         let mut records = Vec::new();
         for key in ids.iter() {
             if let Ok(result) = self.get_internal::<St>(key).await {
                 records.push(result);
             }
-            // swallow errors (i.e. not found)
         }
         Ok(records)
     }
 
-    /// Retrieve the user data for a given user
     async fn get_user_data(&self, username: &AkdLabel) -> Result<KeyData, StorageError> {
         if let Some(result) = self.user_info.get(&username.0) {
             let mut results: Vec<ValueState> = result.values().cloned().collect::<Vec<_>>();
-            // return ordered by epoch (from smallest -> largest)
+
             results.sort_by(|a, b| a.epoch.cmp(&b.epoch));
 
             Ok(KeyData { states: results })
@@ -134,7 +115,6 @@ impl Database for AsyncInMemoryDatabase {
         }
     }
 
-    /// Retrieve a specific state for a given user
     async fn get_user_state(
         &self,
         username: &AkdLabel,
@@ -142,23 +122,17 @@ impl Database for AsyncInMemoryDatabase {
     ) -> Result<ValueState, StorageError> {
         let intermediate = self.get_user_data(username).await?.states;
         match flag {
-            ValueStateRetrievalFlag::MaxEpoch =>
-            // retrieve by max epoch
-            {
+            ValueStateRetrievalFlag::MaxEpoch => {
                 if let Some(value) = intermediate.iter().max_by(|a, b| a.epoch.cmp(&b.epoch)) {
                     return Ok(value.clone());
                 }
             },
-            ValueStateRetrievalFlag::MinEpoch =>
-            // retrieve by min epoch
-            {
+            ValueStateRetrievalFlag::MinEpoch => {
                 if let Some(value) = intermediate.iter().min_by(|a, b| a.epoch.cmp(&b.epoch)) {
                     return Ok(value.clone());
                 }
             },
-            _ =>
-            // search for specific property
-            {
+            _ => {
                 let mut tracked_epoch = 0u64;
                 let mut tracker = None;
                 for kvp in intermediate.iter() {
@@ -236,14 +210,12 @@ impl StorageUtil for AsyncInMemoryDatabase {
     }
 
     async fn batch_get_all_direct(&self) -> Result<Vec<DbRecord>, StorageError> {
-        // get value states
         let u_records = self
             .user_info
             .iter()
             .flat_map(|r| r.value().clone().into_values())
             .map(DbRecord::ValueState);
 
-        // get other records and collect
         let records = self.db.iter().map(|r| r.value().clone()).chain(u_records).collect();
 
         Ok(records)

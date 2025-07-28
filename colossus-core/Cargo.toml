@@ -13,6 +13,7 @@ protobuf-codegen = "3"
 protobuf-parse = "3"
 
 [dependencies]
+blastkids = { workspace = true}
 secrecy = {workspace = true}
 bls12_381_plus  = { workspace = true }
 cid = { workspace = true }
@@ -49,6 +50,7 @@ cosmian_crypto_core = { workspace = true }
 ml-kem = { workspace = true }
 tiny-keccak = { workspace = true }
 rayon = { workspace = true }
+ciborium = {workspace = true}
 
 [dev-dependencies]
 criterion = "0.6.0"
@@ -73,3 +75,5 @@ hex = { version = "0.4", default-features = false, features = ["alloc"] }
 rand-utils = { version = "0.13", package = "winter-rand-utils" }
 rstest = { version = "0.25" }
 seq-macro = { version = "0.3" }
+lazy_static = "1.5.0"
+anyhow = "1.0.98"

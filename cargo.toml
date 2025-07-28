@@ -23,6 +23,8 @@ unused_qualifications = "warn"
 
 [workspace.dependencies]
 colossus-core = { path = "colossus-core" }
+
+blastkids = { version ="0.2.0" }
 secrecy = "0.10.0"
 rayon = "1.10.0"
 cid = { version = "0.11.1", features = ["serde"] }
@@ -71,3 +73,4 @@ thiserror = { version = "2.0", default-features = false }
 num = { version = "0.4", default-features = false, features = ["alloc", "libm"] }
 num-complex = { version = "0.4", default-features = false }
 sha3 = { version = "0.10", default-features = false }
+ciborium = "0.2.2"

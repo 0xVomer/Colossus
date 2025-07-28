@@ -36,7 +36,6 @@ impl From<&[u8]> for ATTRIBUTE {
     }
 }
 
-/// Converts any type that can be converted to a byte slice into a Content Identifier (CID)
 pub fn attribute_cid(
     dimension: impl AsRef<[u8]>,
     attribute: impl AsRef<[u8]>,
@@ -50,7 +49,6 @@ pub fn attribute_cid(
     CidGeneric::<DIGEST_LEN>::new_v1(RAW, mhash)
 }
 
-/// A qualified attribute is composed of a dimension an attribute name.
 #[derive(Hash, PartialEq, Eq, Clone, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(try_from = "&str", into = "String")]
 pub struct QualifiedAttribute {
@@ -59,7 +57,6 @@ pub struct QualifiedAttribute {
 }
 
 impl QualifiedAttribute {
-    /// Creates a qualified attribute with the given dimension and attribute names.
     #[must_use]
     pub fn new(dimension: &str, name: &str) -> Self {
         Self {
@@ -68,40 +65,29 @@ impl QualifiedAttribute {
         }
     }
 
-    /// Returns the Multihash of the Attribute
     pub fn hash(&self) -> &Multihash<DIGEST_LEN> {
         self.cid.hash()
     }
-    /// Returns the bytes representation of the hash digest
+
     pub fn digest(&self) -> &[u8] {
         self.cid.hash().digest()
     }
 
-    /// Returns the bytes representation of the cid
     pub fn bytes(&self) -> ATTRIBUTE {
         ATTRIBUTE::from(self.cid.to_bytes())
     }
 
-    /// Returns teh CID of the Attribute
     pub fn cid(&self) -> &cid::CidGeneric<DIGEST_LEN> {
         &self.cid
     }
-    /// Returns the string representation of the Attribute CID
-    /// given the specified base (base64, base58, base36, etc)
+
     pub fn to_string_of_base(
         &self,
         base: multibase::Base,
     ) -> core::result::Result<String, cid::Error> {
         self.cid.to_string_of_base(base)
     }
-    /// Generate an attribute from a CID
-    /// Check to verify that the CID is a SHAKE256 hash with length 48
-    ///
-    /// Alternatively, use `TryFrom` to convert from a `CID` to an `Attribute`:
-    /// ```rs
-    /// use std::convert::TryFrom;
-    /// let attribute = Attribute::try_from(cid)?;
-    /// ```
+
     pub fn from_cid(dim: String, cid: &cid::CidGeneric<DIGEST_LEN>) -> Option<Self> {
         if cid.codec() == RAW
             && cid.hash().code() == SHA3_256

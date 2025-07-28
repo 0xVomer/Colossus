@@ -138,8 +138,7 @@ impl<const KEY_LENGTH: usize, E: AE<KEY_LENGTH, Error = Error>> PkeAc<KEY_LENGTH
         aad: &[u8],
     ) -> Result<Self::Ciphertext, Self::Error> {
         let (seed, enc) = self.encaps(ek, ap)?;
-        // Locking Covercrypt RNG must be performed after encapsulation since
-        // this encapsulation also requires locking the RNG.
+
         let mut rng = self.rng.lock().expect("poisoned lock");
         let key = SymmetricKey::derive(&seed, b"ROOT-AUTHORIZED-KEY")?;
         E::encrypt(&mut *rng, &key, ptx, aad).map(|ctx| (enc, ctx))

@@ -1,13 +1,9 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! Verification of lookup proofs
-
 use super::{
     AkdLabel, Configuration, Digest, LookupProof, VerificationError, VerifyResult,
     VersionFreshness,
     base::{verify_existence, verify_existence_with_val, verify_nonexistence},
 };
 
-/// Verifies a lookup with respect to the root_hash
 pub fn lookup_verify<TC: Configuration>(
     vrf_public_key: &[u8],
     root_hash: Digest,

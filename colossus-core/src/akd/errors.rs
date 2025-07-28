@@ -1,5 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! Errors for various data structure operations.
 mod auditor;
 mod azks;
 mod directory;
@@ -20,25 +18,23 @@ pub use vrf::VrfError;
 
 use super::{Direction, node_label::NodeLabel};
 
-/// Symbolizes a AkdError, thrown by the akd.
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 pub enum AkdError {
-    /// Error propagation
     TreeNode(TreeNodeError),
-    /// Error propagation
+
     Directory(DirectoryError),
-    /// Error propagation
+
     AzksErr(AzksError),
-    /// Vrf related error
+
     Vrf(VrfError),
-    /// Storage layer error thrown
+
     Storage(StorageError),
-    /// Audit verification error thrown
+
     AuditErr(AuditorError),
-    /// Parallelism/concurrency related errors
+
     Parallelism(ParallelismError),
-    /// Test error
+
     TestErr(String),
 }
 

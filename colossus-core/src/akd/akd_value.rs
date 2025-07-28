@@ -5,7 +5,6 @@ use super::{
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 
-/// The value of a particular entry in the AKD
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct AkdValue(
     #[serde(serialize_with = "bytes_serialize_hex")]
@@ -46,7 +45,6 @@ impl core::convert::From<&String> for AkdValue {
 }
 
 impl AkdValue {
-    /// Gets a random value for a AKD
     pub fn random<R: CryptoRng + Rng>(rng: &mut R) -> Self {
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);

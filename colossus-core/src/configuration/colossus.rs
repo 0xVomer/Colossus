@@ -1,4 +1,3 @@
-//! Defines the Colossus configuration
 use super::{
     AkdLabel, AkdValue, AzksValue, AzksValueWithEpoch, Configuration, DIGEST_BYTES, Digest,
     DomainLabel, NamedConfiguration, NodeLabel, VersionFreshness, i2osp_array,
@@ -6,7 +5,6 @@ use super::{
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
-/// An experimental configuration
 #[derive(Clone)]
 pub struct ColossusConfiguration<L>(PhantomData<L>);
 
@@ -14,8 +12,6 @@ unsafe impl<L> Send for ColossusConfiguration<L> {}
 unsafe impl<L> Sync for ColossusConfiguration<L> {}
 
 impl<L: DomainLabel> ColossusConfiguration<L> {
-    /// Used by the client to supply a commitment nonce and value to reconstruct the commitment, via:
-    /// commitment = H(i2osp_array(value), i2osp_array(nonce))
     fn generate_commitment_from_nonce_client(
         value: &crate::akd::AkdValue,
         nonce: &[u8],
@@ -28,7 +24,6 @@ impl<L: DomainLabel> ColossusConfiguration<L> {
 
 impl<L: DomainLabel> Configuration for ColossusConfiguration<L> {
     fn hash(item: &[u8]) -> Digest {
-        //Hash(domain label || item)
         let mut hasher = blake3::Hasher::new();
         hasher.update(L::domain_label());
         hasher.update(item);
@@ -59,8 +54,6 @@ impl<L: DomainLabel> Configuration for ColossusConfiguration<L> {
         AzksValueWithEpoch(Self::hash(&data))
     }
 
-    /// Used by the server to produce a commitment nonce for an AkdLabel, version, and AkdValue.
-    /// Computes nonce = H(commitment key || label)
     fn get_commitment_nonce(
         commitment_key: &[u8],
         label: &NodeLabel,
@@ -70,16 +63,6 @@ impl<L: DomainLabel> Configuration for ColossusConfiguration<L> {
         Self::hash(&[commitment_key, &label.to_bytes()].concat())
     }
 
-    /// Used by the server to produce a commitment for an AkdLabel, version, and AkdValue
-    ///
-    /// nonce = H(commitment key || label)
-    /// commmitment = H(i2osp_array(value), i2osp_array(nonce))
-    ///
-    /// The nonce value is used to create a hiding and binding commitment using a
-    /// cryptographic hash function. Note that it is derived from the label, version, and
-    /// value (even though the binding to value is somewhat optional).
-    ///
-    /// Note that this commitment needs to be a hash function (random oracle) output
     fn compute_fresh_azks_value(
         commitment_key: &[u8],
         label: &NodeLabel,
@@ -90,16 +73,6 @@ impl<L: DomainLabel> Configuration for ColossusConfiguration<L> {
         AzksValue(Self::hash(&[i2osp_array(value), i2osp_array(&nonce)].concat()))
     }
 
-    /// To convert a regular label (arbitrary string of bytes) into a [NodeLabel], we compute the
-    /// output as: H(label || freshness || version)
-    ///
-    /// Specifically, we concatenate the following together:
-    /// - I2OSP(len(label) as u64, label)
-    /// - A single byte encoded as 0u8 if "stale", 1u8 if "fresh"
-    /// - A u64 representing the version
-    ///
-    /// These are all interpreted as a single byte array and hashed together, with the output
-    /// of the hash returned.
     fn get_hash_from_label_input(
         label: &AkdLabel,
         freshness: VersionFreshness,
@@ -117,7 +90,6 @@ impl<L: DomainLabel> Configuration for ColossusConfiguration<L> {
         hashed_label.to_vec()
     }
 
-    /// Computes the parent hash from the children hashes and labels
     fn compute_parent_hash_from_children(
         left_val: &AzksValue,
         left_label: &[u8],
@@ -127,13 +99,10 @@ impl<L: DomainLabel> Configuration for ColossusConfiguration<L> {
         AzksValue(Self::hash(&[&left_val.0, left_label, &right_val.0, right_label].concat()))
     }
 
-    /// Given the top-level hash, compute the "actual" root hash that is published
-    /// by the directory maintainer
     fn compute_root_hash_from_val(root_val: &AzksValue) -> Digest {
         root_val.0
     }
 
-    /// Similar to commit_fresh_value, but used for stale values.
     fn stale_azks_value() -> AzksValue {
         AzksValue(crate::akd::EMPTY_DIGEST)
     }

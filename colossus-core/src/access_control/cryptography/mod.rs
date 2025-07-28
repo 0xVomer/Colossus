@@ -13,31 +13,18 @@ pub use mlkem::MlKem512 as MlKem;
 pub use nike::R25519 as ElGamal;
 use tiny_keccak::{Hasher, Sha3};
 
-/// The length of the secret encapsulated by Covercrypt.
 pub const SHARED_SECRET_LENGTH: usize = 32;
 
-/// The length of the key used to sign user secret keys.
-///
-/// It is only 16-byte long because no post-quantum security is needed for
-/// now. An upgraded signature scheme can still be added later when quantum
-/// computers become available.
 pub const SIGNING_KEY_LENGTH: usize = 16;
 
-/// The length of the KMAC signature.
 pub const SIGNATURE_LENGTH: usize = 32;
 
-/// KMAC signature is used to guarantee the integrity of the user secret keys.
 pub type KmacSignature = [u8; SIGNATURE_LENGTH];
 
-/// Length of the Covercrypt early abort tag. 128 bits are enough since we only want collision
-/// resistance.
 pub const TAG_LENGTH: usize = 16;
 
-/// Covercrypt early abort tag is used during the decapsulation to verify the
-/// integrity of the result.
 pub type Tag = [u8; TAG_LENGTH];
 
-/// Number of colluding users needed to escape tracing.
 pub const MIN_TRACING_LEVEL: usize = 1;
 
 pub fn xor_2<const LENGTH: usize>(lhs: &[u8; LENGTH], rhs: &[u8; LENGTH]) -> [u8; LENGTH] {
@@ -109,14 +96,6 @@ pub struct Encapsulations(
     pub Vec<(<MlKem as traits::Kem>::Encapsulation, [u8; SHARED_SECRET_LENGTH])>,
 );
 
-/// Covercrypt encapsulation.
-///
-/// It is created for a subset of rights from Omega.
-///
-/// It is composed of:
-/// - the early abort tag;
-/// - the traps used to select users that can open this encapsulation;
-/// - the right encapsulations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct XEnc {
     pub tag: Tag,
@@ -125,7 +104,6 @@ pub struct XEnc {
 }
 
 impl XEnc {
-    /// Returns the tracing level of this encapsulation.
     pub fn tracing_level(&self) -> usize {
         self.c.len() - 1
     }

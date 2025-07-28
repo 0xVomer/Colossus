@@ -13,50 +13,27 @@ use bls12_381_plus::elliptic_curve::ops::MulByGenerator;
 use bls12_381_plus::ff::Field;
 use bls12_381_plus::group::{Curve, Group};
 use bls12_381_plus::{G1Affine, G2Affine};
-use cosmian_crypto_core::reexport::rand_core::OsRng;
-//use rand::rngs::ThreadRng;
+use cosmian_crypto_core::{
+    CsRng,
+    reexport::rand_core::{OsRng, SeedableRng},
+};
 use secrecy::ExposeSecret;
 use secrecy::SecretBox;
 use serde::{Deserialize, Serialize};
 use tiny_keccak::{Hasher, Sha3};
 
-use cosmian_crypto_core::{
-    CsRng,
-    reexport::rand_core::{CryptoRngCore, SeedableRng},
-};
-
-/// Public Parameters of the Set Commitment
-/// - `pp_commit_g1`: Root Issuer's public parameters commitment for G1
-/// - `pp_commit_g2`: Root Issuer's public parameter commitment for G2
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ParamSetCommitment {
     pub pp_commit_g1: Vec<G1Projective>,
     pub pp_commit_g2: Vec<G2Projective>,
 }
 
-/// Compressed Public Parameters of the Set Commitment. Length depends on what
-/// the max cardinality is set to.
-///
-/// The size of these commits are determined by the max cardinality of the set, plus one.
-///
-/// For example, max cardinality of t, the size of the compressed commitment is:
-/// (48 (G1) + 96 (G2)) * (t + 1) = length
-///
-/// | Size G1 | Size G2 | Max Cardinality | Size of Compressed Commitment|
-/// |---------|---------|-----------------|------------------------------|
-/// | 48      | 96      | 2               | 432                          |
-/// | 48      | 96      | 4               | 720                          |
-/// | 48      | 96      | 6               | 1008                         |
-/// | 48      | 96      | 8               | 1296                         |
-/// | 48      | 96      | 10              | 1584                         |
-/// | 48      | 96      | 12              | 1872                         |
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ParamSetCommitmentCompressed {
     pub pp_commit_g1: Vec<Vec<u8>>,
     pub pp_commit_g2: Vec<Vec<u8>>,
 }
 
-/// From [ParamSetCommitment] to [ParamSetCommitmentCompressed]
 impl From<ParamSetCommitment> for ParamSetCommitmentCompressed {
     fn from(param_sc: ParamSetCommitment) -> Self {
         let pp_commit_g1_compressed = param_sc
@@ -78,7 +55,6 @@ impl From<ParamSetCommitment> for ParamSetCommitmentCompressed {
     }
 }
 
-/// TryFrom [ParamSetCommitmentCompressed] to [ParamSetCommitment]
 impl std::convert::TryFrom<ParamSetCommitmentCompressed> for ParamSetCommitment {
     type Error = error::Error;
 
@@ -119,14 +95,12 @@ impl std::convert::TryFrom<ParamSetCommitmentCompressed> for ParamSetCommitment 
     }
 }
 
-/// ToString for ParamSetCommitmentCompressed
 impl ToString for ParamSetCommitmentCompressed {
     fn to_string(&self) -> String {
         serde_json::to_string(self).expect("compressed should be well formed")
     }
 }
 
-/// Converts the PublicParameters to a json string
 impl ToString for ParamSetCommitment {
     fn to_string(&self) -> String {
         ParamSetCommitmentCompressed::from(self.clone()).to_string()
@@ -134,22 +108,10 @@ impl ToString for ParamSetCommitment {
 }
 
 impl ParamSetCommitment {
-    /// New constructor. Initializes the ParamSetCommitment
-    ///
-    /// # Arguments
-    /// t: [MaxCardinality] of the set. Cardinality of the set is in [1, t]. t is a public parameter.
-    ///
-    /// # Returns
-    /// ParamSetCommitment
     pub fn new(t: &usize) -> ParamSetCommitment {
         let rng = CsRng::from_entropy();
         let base: SecretBox<Scalar> = SecretBox::new(Box::new(Scalar::random(rng))); // security parameter λ
 
-        // pp_commit_g1 and pp_commit_g2 are vectors of G1 and G2 elements respectively.
-        // They are used to compute the commitment and witness.
-        // The number of polynomial coefficients is one more than the degree of the polynomial.
-        // Since `pp_commit_g2` is used to compute the witness, we need to add one more element to the vector.
-        // Hence use [..=] instead of [..] to ensure the last element is included.
         let pp_commit_g1 = (0..=*t)
             .map(|i| {
                 G1Projective::mul_by_generator(&base.expose_secret().pow(&[i as u64, 0, 0, 0]))
@@ -165,62 +127,24 @@ impl ParamSetCommitment {
     }
 }
 
-/// Public trait Commitment common for both SetCommitment and CrossSetCommitment
-/// This trait is used to define the common functions for both SetCommitment and CrossSetCommitment
 pub trait Commitment {
-    /// Creates a new commitment scheme.
-    ///
-    /// # Arguments
-    /// - `t`: max cardinality of the set. Cardinality of the set is in [1, t]. t is a public parameter.
-    ///
-    /// # Returns
-    /// A Commitment scheme, either SetCommitment or CrossSetCommitment
     #[allow(dead_code)]
     fn new(t: MaxCardinality) -> Self;
 
-    /// Public parameters of the commitment scheme.
     #[allow(dead_code)]
     fn public_parameters(self) -> ParamSetCommitment;
 
-    /// Commit to a set of messages
-    ///
-    /// # Arguments
-    /// `param_sc`: [ParamSetCommitment] public parameters for the commitment scheme, as P^ai, P_hat^ai, P = g1, P_hat = g2, Order, BG
-    /// `mess_set_str`: a vector of [Entry]s
-    ///
-    /// # Returns
-    /// Tuple of (commitment, witness) if
-    ///
-    /// # Method
-    /// 1. Convert the message set to a vector of Scalars
-    /// 2. Compute the commitment as a product of P^ai, P_hat^ai, where ai is the ith element of the message set
-    /// 3. Compute the witness as a product of P^ai, P_hat^ai, where ai is the ith element of the message set
-    /// 4. Return the commitment and witness
     fn commit_set(param_sc: &ParamSetCommitment, mess_set_str: &Entry) -> (G1Projective, Scalar) {
         let mess_set: Vec<Scalar> = entry_to_scalar(mess_set_str);
         let monypol_coeff = polynomial_from_roots(&mess_set);
         let pre_commit = generate_pre_commit(monypol_coeff, param_sc);
 
-        // randomness Rho (ρ)
         let open_info = Scalar::random(OsRng::default());
 
-        // multiply pre_commit by rho (open_info = rho). Rho is a random element in Zp. Zp is the set of integers modulo p.
         let commitment = pre_commit * open_info;
         (commitment, open_info)
     }
 
-    /// Open a commitment to a set of messages. This is the verification step. Verifies the opening information of a set.
-    ///
-    /// # Arguments
-    ///
-    /// param_sc: public parameters for the commitment scheme, as P^ai, P_hat^ai, P = g1, P_hat = g2, Order, BG
-    /// commitment: commitment to a set of messages
-    /// open_info: opening information of the commitment
-    /// mess_set_str: a message set as a string
-    ///
-    /// # Returns
-    ///
-    /// bool: true if the opening information is valid, false otherwise
     #[allow(dead_code)]
     fn open_set(
         param_sc: &ParamSetCommitment,
@@ -232,25 +156,11 @@ pub trait Commitment {
         let monypol_coeff = polynomial_from_roots(&mess_set);
         let pre_commit = generate_pre_commit(monypol_coeff, param_sc);
 
-        // multiply pre_commit by rho. Rho is a random element in Zp. Zp is the set of integers modulo p.
         let commitment_check = pre_commit * open_info;
 
         *commitment == commitment_check
     }
 
-    /// Opens a subet of Attributes for an Entry
-    /// `open_subset` generates a witness for the subset only if
-    /// the length of the subset is less than the length of the message set
-    ///
-    /// # Arguments
-    ///
-    /// param_sc: public parameters for the commitment scheme, as P^ai, P_hat^ai, P = g1, P_hat = g2, Order, BG
-    /// mess_set_str: the message set
-    /// open_info: opening information of the commitment
-    /// subset_str: the subset of the message set
-    ///
-    /// # Returns
-    /// Some witness for the subset or None if the subset is not a subset of the message set
     fn open_subset(
         param_sc: &ParamSetCommitment,
         all_messages: &Entry,
@@ -264,26 +174,19 @@ pub trait Commitment {
         let mess_set: Vec<Scalar> = entry_to_scalar(all_messages);
         let mess_subset_t = entry_to_scalar(subset);
 
-        // check if mess_subset is a subset of mess_set
-        // compare the lengths of the two vectors
         if mess_subset_t.len() > mess_set.len() {
             return None;
         }
 
-        // now, for each item in mess_subset_t, if item is in mess_set, checker = true, else checker = false
-        // check to ensure all messages in mess_subset_t are in mess_set
         if !mess_subset_t.iter().all(|item| mess_set.contains(item)) {
             return None;
         }
 
-        // creates a list of elements that are in mess_set but not in mess_subset_t,
-        // use into_iter() to consume the owned value (mess_set) and return an iterator
         let create_witn_elements: Vec<Scalar> = mess_set
             .into_iter()
             .filter(|itm| !mess_subset_t.contains(itm))
             .collect::<Vec<Scalar>>();
 
-        // compute a witness for the subset
         let coeff_witn = polynomial_from_roots(&create_witn_elements);
         let witn_sum = generate_pre_commit(coeff_witn, param_sc);
 
@@ -291,18 +194,6 @@ pub trait Commitment {
         Some(witness)
     }
 
-    /// VerifySubset verifies the witness for the subset. Verifies if witness proves that subset_str is a subset of the original message set.
-    ///
-    /// # Arguments
-    ///
-    /// param_sc: public parameters for the commitment scheme, as P^ai, P_hat^ai, P = g1, P_hat = g2, Order, BG
-    /// commitment: commitment to a set of messages
-    /// subset_str: the subset of the message set
-    /// witness: witness for the subset
-    ///
-    /// # Returns
-    ///
-    /// bool: true if the witness is valid, false otherwise
     #[allow(dead_code)]
     fn verify_subset(
         param_sc: &ParamSetCommitment,
@@ -320,7 +211,6 @@ pub trait Commitment {
             .map(|(g2, coeff)| g2 * coeff)
             .collect::<Vec<G2Projective>>();
 
-        // sum all points
         let subset_elements_sum =
             subset_group_elements.iter().fold(G2Projective::IDENTITY, |acc, x| acc + x);
 
@@ -332,20 +222,8 @@ pub struct SetCommitment {
     param_sc: ParamSetCommitment,
 }
 
-// impl all default traits for SetCommitment
 impl Commitment for SetCommitment {
-    /// Creates a new commitment scheme.
-    ///
-    /// # Arguments
-    /// - `t`: max cardinality of the set. Cardinality of the set is in [1, t]. t is a public parameter.
-    ///
-    /// # Returns
-    /// A Commitment scheme, either SetCommitment or CrossSetCommitment
     fn new(t: MaxCardinality) -> Self {
-        // return union type of SetCommitment and CrossSetCommitment.
-        // A Rust union type is a type that can store only one of its members at a time.
-        // ie. it can be either SetCommitment or CrossSetCommitment.
-        // it looks like: `pub enum Commitment { SetCommitment(SetCommitment), CrossSetCommitment(CrossSetCommitment) }`
         Self { param_sc: ParamSetCommitment::new(&t) }
     }
 
@@ -354,48 +232,25 @@ impl Commitment for SetCommitment {
     }
 }
 
-/// CrossSetCommitment extends the Set Commitment to provide aggregation witness and a batch verification
-/// - `param_sc`: [`ParamSetCommitment`] public parameters for the commitment scheme, as P^ai, P_hat^ai, P = g1, P_hat = g2, Order, BG
 pub struct CrossSetCommitment {
     pub param_sc: ParamSetCommitment,
 }
 
-// impl all default traits for CrossSetCommitment
 impl Commitment for CrossSetCommitment {
-    /// Creates a new commitment scheme.
-    ///
-    /// # Arguments
-    /// - `t`: max cardinality of the set. Cardinality of the set is in [1, t]. t is a public parameter.
-    ///
-    /// # Returns
-    /// A Commitment scheme, for CrossSetCommitment
     fn new(t: MaxCardinality) -> Self {
         CrossSetCommitment { param_sc: ParamSetCommitment::new(&t) }
     }
 
-    /// Exports the public parameters of the commitment scheme.
-    /// Values are borrowed from the commitment scheme.
-    /// If the user needs the values to outlive the commitment scheme, they should clone the values.
     fn public_parameters(self) -> ParamSetCommitment {
         self.param_sc
     }
 }
 
-/// CrossSetCommitment is a commitment scheme that extends the Set Commitment to provide aggregation witness and a batch verification
 impl CrossSetCommitment {
-    /// Computes an aggregate proof of valid subsets of a set of messages.
-    ///
-    /// # Arguments
-    /// witness_vector: a vector of witnessess
-    /// commit_vector: the commitment vector
-    ///
-    /// # Returns
-    /// a proof which is a aggregate of witnesses and shows all subsets are valid for respective sets
     pub fn aggregate_cross(
         witness_vector: &[G1Projective],
         commit_vector: &[G1Projective],
     ) -> G1Projective {
-        // sum all elements in all witness_vectors
         witness_vector.iter().zip(commit_vector.iter()).fold(
             G1Projective::identity(),
             |acc, (witness, commit)| {
@@ -405,25 +260,12 @@ impl CrossSetCommitment {
         )
     }
 
-    /// Verifies an aggregate proof of valid subsets of a set of messages.
-    /// Filters out any selected [Entry]s that are empty
-    ///
-    /// # Arguments
-    /// param_sc: public parameters
-    /// commit_vector: the commitment vector
-    /// entry_subsets_vector: Vector of sleected [Entry]s
-    /// proof: a proof which is a aggregate of witnesses
-    ///
-    /// # Returns
-    /// true if the proof is valid, false otherwise
     pub fn verify_cross(
         param_sc: &ParamSetCommitment,
         commit_vector: &[G1Projective],
         selected_entry_subset_vector: &[Entry],
         proof: &G1Projective,
     ) -> bool {
-        // Steps:
-        // 1. convert message str into the BN
         let subsets_vector: Vec<Vec<Scalar>> = selected_entry_subset_vector
             .iter()
             .enumerate()
@@ -431,7 +273,6 @@ impl CrossSetCommitment {
             .map(|(_, entry)| entry_to_scalar(entry))
             .collect();
 
-        // create a union of sets
         let set_s = subsets_vector
             .iter()
             .fold(Vec::new(), |mut acc, x| {
@@ -443,7 +284,6 @@ impl CrossSetCommitment {
 
         let coeff_set_s = polynomial_from_roots(&set_s);
 
-        // 2. compute right side of verification, pp_commit_g2
         let set_s_group_element = param_sc
             .pp_commit_g2
             .iter()
@@ -454,7 +294,6 @@ impl CrossSetCommitment {
         let set_s_elements_sum =
             set_s_group_element.iter().fold(G2Projective::IDENTITY, |acc, x| acc + x);
 
-        // right_side is the pairing of proof and set_s_elements_sum
         let right_side = pairing(proof, &set_s_elements_sum);
 
         let set_s_not_t = subsets_vector
@@ -462,7 +301,6 @@ impl CrossSetCommitment {
             .map(|x| not_intersection(&set_s, x))
             .collect::<Vec<Vec<Scalar>>>();
 
-        // 3. compute left side of verification
         let vector_gt = commit_vector
             .iter()
             .zip(set_s_not_t.iter())
@@ -487,13 +325,11 @@ impl CrossSetCommitment {
 
         let left_side = vector_gt.iter().fold(Gt::IDENTITY, |acc, x| acc * *x);
 
-        // 4. compare left and right side of verification to see if they are equal
         left_side == right_side
     }
 }
 
 fn hash_to_scalar(commit: &G1Projective) -> Scalar {
-    // Note the choice of compressed vs uncompressed bytes is arbitrary.
     let mut hasher = Sha3::v256();
     let mut chash = [0u8; 32];
 
@@ -506,7 +342,6 @@ pub fn generate_pre_commit(
     monypol_coeff: UnivarPolynomial,
     param_sc: &ParamSetCommitment,
 ) -> G1Projective {
-    // multiply each pp_commit_g1 by each monypol_coeff and put result in a vector
     let coef_points = param_sc
         .pp_commit_g1
         .iter()
@@ -514,11 +349,9 @@ pub fn generate_pre_commit(
         .map(|(g1, coeff)| g1 * coeff)
         .collect::<Vec<G1Projective>>();
 
-    //sum all the elements in coef_points as Scalars into a pre_commit
     coef_points.iter().fold(G1Projective::IDENTITY, |acc, x| acc + x)
 }
 
-/// Returns where the two Arguments do not intersect
 pub fn not_intersection(list_s: &[Scalar], list_t: Vec<Scalar>) -> Vec<Scalar> {
     list_s
         .iter()
@@ -545,7 +378,7 @@ mod test {
 
         let sc = SetCommitment::new(MaxCardinality(max_cardinal));
         let (commitment, witness) = SetCommitment::commit_set(&sc.param_sc, &attrib_set);
-        // assrt open_set with pp, commitment, O, set_str
+
         assert!(SetCommitment::open_set(&sc.param_sc, &commitment, &witness, &attrib_set));
     }
 
@@ -566,7 +399,6 @@ mod test {
         let witness_subset =
             SetCommitment::open_subset(&sc.param_sc, &attrib_set, &opening_info, &attrib_subset);
 
-        // assert that there is some witness_subset
         assert!(witness_subset.is_some());
 
         let witness_subset = witness_subset.expect("Some witness");
@@ -581,8 +413,6 @@ mod test {
 
     #[test]
     fn test_aggregate_verify_cross() {
-        // check aggregation of witnesses using cross set commitment scheme
-
         let attrib_set_a: Entry = Entry(vec![
             Attribute::from(("AGE", "OVER18")),
             Attribute::from(("GENDER", "FEM")),
@@ -595,13 +425,7 @@ mod test {
             Attribute::from(("ROLE", "DELIVERY")),
         ]);
 
-        // create two set commitments for two sets set_str and set_str2
         let max_cardinal = 5;
-
-        // CrossSetCommitment should be;
-        // Ways to create a CrossSetCommitment:
-        // new(max_cardinal) -> CrossSetCommitment
-        // from(PublicParameters) -> CrossSetCommitmen
 
         let csc = CrossSetCommitment::new(MaxCardinality(max_cardinal));
         let (commitment_1, opening_info_1) =
@@ -611,7 +435,6 @@ mod test {
 
         let commit_vector = &vec![commitment_1, commitment_2];
 
-        // create a witness for each subset -> W1 and W2
         let attrib_subset_1 = Entry(vec![
             Attribute::from(("AGE", "OVER18")),
             Attribute::from(("GENDER", "FEM")),
@@ -636,10 +459,8 @@ mod test {
         )
         .expect("Some Witness");
 
-        // aggregate all witnesses for a subset is correct -> proof
         let proof = CrossSetCommitment::aggregate_cross(&vec![witness_1, witness_2], commit_vector);
 
-        // verification aggregated witnesses
         assert!(CrossSetCommitment::verify_cross(
             &csc.param_sc,
             commit_vector,
@@ -652,7 +473,6 @@ mod test {
     fn test_little_endien_power() {
         let base: Scalar = Scalar::ONE + Scalar::ONE;
 
-        // Little endian means the least signifcant byte is written first
         let result = &base.pow(&[2u64, 0, 0, 0]);
 
         let expected = Scalar::from(4u64);
@@ -660,7 +480,6 @@ mod test {
         assert_eq!(result, &expected);
     }
 
-    // Test ParamSetCommitment compressed roundtrip
     #[test]
     fn test_param_set_commitment_roundtrip() {
         let max_cardinal = 5;
