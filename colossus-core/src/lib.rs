@@ -80,14 +80,14 @@ mod test {
     #[test]
     fn test_access_control() -> Result<()> {
         let access_control = AccessControl::default();
-        let (mut auth, _) = access_control.setup()?;
+        let (mut auth, _) = access_control.setup_capability_authority()?;
 
         Age::insert_into(&mut auth.access_structure)?;
 
         let cred_issuer = Issuer::default();
         let cred_issuer_public = cred_issuer.public.to_compact().to_cbor().unwrap();
 
-        let rpk = access_control.update_auth(&mut auth)?;
+        let rpk = access_control.update_capability_authority(&mut auth)?;
 
         // Alice creates encrypted header with Access Policy: "AGE::ADULT || AGE::SENIOR"
         let ap = AccessPolicy::parse("AGE::ADULT || AGE::SENIOR").unwrap();
@@ -124,10 +124,10 @@ mod test {
 
         // Bob acquires access-right keys
         assert!(verify_proof(&cred_issuer.public, &cred_proof, &[attr_entry], Some(&NONCE)));
-        let access_keys = access_control.grant_access_right_keys(&mut auth, &ap).unwrap();
+        let capability = access_control.grant_capability(&mut auth, &ap).unwrap();
 
         match enc_header
-            .decrypt(&access_control, &access_keys, Some(&NONCE.to_be_bytes()))
+            .decrypt(&access_control, &capability, Some(&NONCE.to_be_bytes()))
             .unwrap()
         {
             Some(data) => {

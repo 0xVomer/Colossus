@@ -1,8 +1,8 @@
 use crate::{
     access_control::{
-        AccessControl, RootPublicKey,
+        AccessControl, CapabilityAuthorityPublicKey,
+        capability::AccessCapabilityToken,
         cryptography::{SHARED_SECRET_LENGTH, XEnc, traits::KemAc},
-        root_authority::UserSecretKey,
     },
     policy::{AccessPolicy, Error},
 };
@@ -26,12 +26,12 @@ pub struct EncryptedHeader {
 impl EncryptedHeader {
     pub fn generate(
         api: &AccessControl,
-        rpk: &RootPublicKey,
+        auth_pk: &CapabilityAuthorityPublicKey,
         ap: &AccessPolicy,
         metadata: Option<&[u8]>,
         authentication_data: Option<&[u8]>,
     ) -> Result<(Secret<SHARED_SECRET_LENGTH>, Self), Error> {
-        let (seed, encapsulation) = api.encaps(rpk, ap)?;
+        let (seed, encapsulation) = api.encaps(auth_pk, ap)?;
 
         let encrypted_metadata = metadata
             .map(|bytes| {
@@ -52,7 +52,7 @@ impl EncryptedHeader {
     pub fn decrypt(
         &self,
         api: &AccessControl,
-        usk: &UserSecretKey,
+        usk: &AccessCapabilityToken,
         authentication_data: Option<&[u8]>,
     ) -> Result<Option<CleartextHeader>, Error> {
         api.decaps(usk, &self.encapsulation)?
@@ -158,7 +158,7 @@ mod serialization {
         let (mut msk, mpk) = gen_auth(&api, false).unwrap();
 
         let ap = AccessPolicy::parse("(DPT::MKG || DPT::FIN) && SEC::TOP").unwrap();
-        let usk = api.grant_access_right_keys(&mut msk, &ap).unwrap();
+        let usk = api.grant_capability(&mut msk, &ap).unwrap();
 
         let test_encrypted_header = |ap, metadata, authentication_data| {
             let (secret, encrypted_header) =

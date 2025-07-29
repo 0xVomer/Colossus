@@ -1,5 +1,5 @@
 use crate::{
-    access_control::{AccessControl, RootAuthority, RootPublicKey},
+    access_control::{AccessControl, CapabilityAuthority, CapabilityAuthorityPublicKey},
     policy::{AccessStructure, Error},
 };
 
@@ -27,9 +27,9 @@ pub fn gen_structure(policy: &mut AccessStructure, complete: bool) -> Result<(),
 pub fn gen_auth(
     api: &AccessControl,
     complete: bool,
-) -> Result<(RootAuthority, RootPublicKey), Error> {
-    let (mut auth, _) = api.setup()?;
+) -> Result<(CapabilityAuthority, CapabilityAuthorityPublicKey), Error> {
+    let (mut auth, _) = api.setup_capability_authority()?;
     gen_structure(&mut auth.access_structure, complete)?;
-    let rpk = api.update_auth(&mut auth)?;
+    let rpk = api.update_capability_authority(&mut auth)?;
     Ok((auth, rpk))
 }

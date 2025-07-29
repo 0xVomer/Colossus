@@ -1,3 +1,4 @@
+use crate::dac::{entry::MaxEntries, keypair::MaxCardinality};
 use crate::{
     access_control::cryptography::{
         ElGamal, Encapsulations, G_hash, H_hash, J_hash, KmacSignature, MIN_TRACING_LEVEL, MlKem,
@@ -7,17 +8,30 @@ use crate::{
     },
     policy::{AccessStructure, AttributeStatus, Error, RevisionMap, RevisionVec, Right},
 };
+
+use blastkids::kdf;
+use bls12_381_plus::G1Affine;
+pub use bls12_381_plus::G1Projective;
+use bls12_381_plus::G2Affine;
+pub use bls12_381_plus::G2Projective;
+pub use bls12_381_plus::Scalar;
+use bls12_381_plus::elliptic_curve::hash2curve::ExpandMsgXmd;
+use bls12_381_plus::elliptic_curve::ops::MulByGenerator;
+pub use bls12_381_plus::group::Curve;
+pub use bls12_381_plus::group::Group;
+pub use secrecy::zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+
 use cosmian_crypto_core::{
     FixedSizeCBytes, RandomFixedSizeCBytes, Secret, SymmetricKey,
     bytes_ser_de::{Deserializer, Serializable, Serializer, to_leb128_len},
     reexport::rand_core::CryptoRngCore,
 };
+pub use secrecy::{ExposeSecret, SecretBox};
 use std::{
     collections::{HashMap, HashSet, LinkedList},
     mem::take,
 };
 use tiny_keccak::{Hasher, Kmac, Sha3};
-use zeroize::Zeroize;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct UserId(pub LinkedList<<ElGamal as Nike>::SecretKey>);
@@ -148,15 +162,18 @@ impl Serializable for TracingPublicKey {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct RootAuthority {
     pub access_structure: AccessStructure,
+
+    master_sk: SecretBox<Scalar>,
+    signing_key: Option<SymmetricKey<SIGNING_KEY_LENGTH>>,
+
+    sk_access_rights: RevisionMap<Right, (bool, AccessRightSecretKey)>,
     users: HashSet<UserId>,
 
     sk: <ElGamal as Nike>::SecretKey,
-    signing_key: Option<SymmetricKey<SIGNING_KEY_LENGTH>>,
     tracers: LinkedList<(<ElGamal as Nike>::SecretKey, <ElGamal as Nike>::PublicKey)>,
-    sk_access_rights: RevisionMap<Right, (bool, AccessRightSecretKey)>,
 }
 
 impl RootAuthority {
@@ -170,6 +187,9 @@ impl RootAuthority {
             )));
         }
 
+        let master_sk: Scalar =
+            kdf::derive_master_sk(seed.as_ref()).expect("Seed has length of 32 bytes");
+
         Ok(RootAuthority {
             access_structure: AccessStructure::default(),
             users: HashSet::new(),
@@ -177,7 +197,26 @@ impl RootAuthority {
             sk_access_rights: RevisionMap::new(),
             signing_key: Some(SymmetricKey::<SIGNING_KEY_LENGTH>::new(rng)),
             tracers: (0..=tracing_level).map(|_| ElGamal::keygen(rng)).collect::<Result<_, _>>()?,
+            master_sk: SecretBox::new(Box::new(master_sk)),
         })
+    }
+
+    pub fn new_credential_issuer(
+        &self,
+        index: u32,
+        t: MaxCardinality,
+        l_message: MaxEntries,
+    ) -> Account {
+        let sk: SecretBox<Scalar> =
+            SecretBox::new(Box::new(kdf::ckd_sk_hardened(self.master_sk.expose_secret(), index)));
+
+        let sk_hardened_0 =
+            Zeroizing::new(kdf::ckd_sk_normal::<G2Projective>(sk.expose_secret(), 0));
+
+        let pk_g1 = G1Projective::mul_by_generator(&sk_hardened_0);
+        let pk_g2 = G2Projective::mul_by_generator(sk.expose_secret());
+
+        Account { index, sk, pk_g1, pk_g2 }
     }
 
     pub fn count(&self) -> usize {
@@ -574,7 +613,7 @@ impl RootPublicKey {
         &self,
         r: &<ElGamal as Nike>::SecretKey,
     ) -> Vec<<ElGamal as Nike>::PublicKey> {
-        self.tpk.0.iter().map(|Pi| Pi * r).collect()
+        self.tpk.0.iter().map(|pi| pi * r).collect()
     }
 
     pub fn select_access_right_keys(
