@@ -2,14 +2,17 @@ use super::{
     AliasProof, CBORCodec, Credential, Entry, IssuerError, MaxCardinality, MaxEntries, Signature,
     verify,
 };
-use crate::dac::{
-    builder::CredentialBuilder,
-    ec::Scalar,
-    keys::{VK, VKCompressed},
-    set_commits::{
-        Commitment, CrossSetCommitment, ParamSetCommitment, ParamSetCommitmentCompressed,
+use crate::{
+    dac::{
+        builder::CredentialBuilder,
+        ec::Scalar,
+        keys::{VK, VKCompressed},
+        set_commits::{
+            Commitment, CrossSetCommitment, ParamSetCommitment, ParamSetCommitmentCompressed,
+        },
+        zkp::{DamgardTransform, Nonce},
     },
-    zkp::{DamgardTransform, Nonce},
+    policy::AccessStructure,
 };
 use bls12_381_plus::{
     G1Affine, G1Projective, G2Affine, G2Projective, elliptic_curve::ops::MulByGenerator, ff::Field,
@@ -28,6 +31,7 @@ pub struct Issuer {
 pub struct IssuerPublic {
     pub parameters: ParamSetCommitment,
     pub vk: Vec<VK>,
+    pub access_structure: AccessStructure,
 }
 
 impl CBORCodec for IssuerPublicCompressed {}
@@ -47,6 +51,7 @@ impl IssuerPublic {
 
         IssuerPublicCompressed {
             vk: vk_b64,
+            access_structure: self.access_structure.clone(),
             parameters: self.parameters.clone().into(),
         }
     }
@@ -55,7 +60,7 @@ impl IssuerPublic {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IssuerPublicCompressed {
     pub parameters: ParamSetCommitmentCompressed,
-
+    pub access_structure: AccessStructure,
     pub vk: Vec<VKCompressed>,
 }
 
@@ -69,6 +74,7 @@ impl From<IssuerPublic> for IssuerPublicCompressed {
     fn from(item: IssuerPublic) -> Self {
         Self {
             parameters: item.parameters.into(),
+            access_structure: item.access_structure.clone(),
             vk: item.vk.iter().map(|vk| vk.into()).collect::<Vec<_>>(),
         }
     }
@@ -78,6 +84,7 @@ impl From<&IssuerPublic> for IssuerPublicCompressed {
     fn from(item: &IssuerPublic) -> Self {
         Self {
             parameters: item.parameters.clone().into(),
+            access_structure: item.access_structure.clone(),
             vk: item.vk.iter().map(|vk| vk.into()).collect::<Vec<_>>(),
         }
     }
@@ -117,36 +124,40 @@ impl TryFrom<IssuerPublicCompressed> for IssuerPublic {
             .collect::<Result<Vec<_>, Self::Error>>()?;
 
         Ok(Self {
+            access_structure: item.access_structure.clone(),
             parameters: item.parameters.try_into()?,
             vk,
         })
     }
 }
 
-impl Default for Issuer {
-    fn default() -> Self {
-        Self::new(MaxCardinality::default(), MaxEntries::default())
-    }
-}
-
 impl Issuer {
-    pub fn new(t: MaxCardinality, l_message: MaxEntries) -> Self {
+    pub fn setup(t: Option<MaxCardinality>, access_structure: &AccessStructure) -> Self {
         let rng = CsRng::from_entropy();
+        let l_message = MaxEntries(access_structure.no_attributes());
 
         let sk = SecretBox::new(Box::new(
             (0..l_message.0 + 2).map(|_| Scalar::random(rng.clone())).collect::<Vec<_>>(),
         ));
 
-        Self::new_with_secret(sk, t)
+        Self::new_with_secret(sk, t.unwrap_or(MaxCardinality::default()), access_structure)
     }
 
-    pub fn new_with_secret(sk: SecretBox<Vec<Scalar>>, t: MaxCardinality) -> Self {
+    pub fn new_with_secret(
+        sk: SecretBox<Vec<Scalar>>,
+        t: MaxCardinality,
+        access_structure: &AccessStructure,
+    ) -> Self {
         let public_parameters = ParamSetCommitment::new(&t);
 
-        Self::new_with_params(sk, public_parameters)
+        Self::new_with_params(sk, public_parameters, access_structure)
     }
 
-    pub fn new_with_params(sk: SecretBox<Vec<Scalar>>, params: ParamSetCommitment) -> Self {
+    pub fn new_with_params(
+        sk: SecretBox<Vec<Scalar>>,
+        params: ParamSetCommitment,
+        access_structure: &AccessStructure,
+    ) -> Self {
         let mut vk: Vec<VK> = sk
             .expose_secret()
             .iter()
@@ -158,7 +169,11 @@ impl Issuer {
 
         Self {
             sk,
-            public: IssuerPublic { parameters: params, vk },
+            public: IssuerPublic {
+                parameters: params,
+                vk,
+                access_structure: access_structure.clone(),
+            },
         }
     }
 

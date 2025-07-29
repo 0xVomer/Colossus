@@ -1,4 +1,5 @@
 use super::*;
+use crate::dac::keys::VK;
 
 #[derive(Debug, PartialEq)]
 pub struct CapabilityAuthority {
@@ -11,6 +12,7 @@ pub struct CapabilityAuthority {
 
     sk_trace: <ElGamal as Nike>::SecretKey,
     tracers: LinkedList<(<ElGamal as Nike>::SecretKey, <ElGamal as Nike>::PublicKey)>,
+    // vk_registry: RevisionMap<VK, AccessStructure>,
 }
 
 impl CapabilityAuthority {
@@ -30,6 +32,7 @@ impl CapabilityAuthority {
             sk_trace: <ElGamal as Nike>::SecretKey::random(rng),
             sk_access_rights: RevisionMap::new(),
             signing_key: Some(SymmetricKey::<SIGNING_KEY_LENGTH>::new(rng)),
+            // vk_registry: RevisionMap::new(),
             tracers: (0..=tracing_level).map(|_| ElGamal::keygen(rng)).collect::<Result<_, _>>()?,
         })
     }

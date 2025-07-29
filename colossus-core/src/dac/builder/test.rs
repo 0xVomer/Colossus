@@ -2,7 +2,10 @@ use super::*;
 use anyhow::Result;
 use lazy_static::lazy_static;
 
-use crate::dac::{entry::MaxEntries, keypair::verify_proof};
+use crate::{
+    dac::{entry::MaxEntries, keypair::verify_proof},
+    policy::AccessStructure,
+};
 
 lazy_static! {
     static ref NONCE: Nonce = Nonce(Scalar::from(42u64));
@@ -10,11 +13,21 @@ lazy_static! {
 
 #[test]
 fn test_credential_building() -> Result<()> {
-    let issuer = Issuer::default();
-    let alias = Alias::new();
-
     let age_adult = QualifiedAttribute::from(("AGE", "ADULT"));
     let age_senior = QualifiedAttribute::from(("AGE", "SENIOR"));
+    let void = QualifiedAttribute::from(("VOID", "VOID"));
+
+    let mut access_structure = AccessStructure::new();
+    access_structure.add_hierarchy("AGE".to_string())?;
+    access_structure.add_attribute(age_adult.clone(), None)?;
+    access_structure.add_attribute(age_senior.clone(), Some("ADULT"))?;
+
+    access_structure.add_anarchy("VOID".to_string())?;
+    access_structure.add_attribute(void.clone(), None)?;
+
+    let issuer = Issuer::setup(None, &access_structure);
+    let alias = Alias::new();
+
     let root_entry = Entry::new(&[age_adult, age_senior]);
 
     let cred = issuer
@@ -38,9 +51,12 @@ fn test_credential_building() -> Result<()> {
         .issue_to(&alias.alias_proof(&NONCE), Some(&NONCE))?;
 
     assert_eq!(cred.commitment_vector.len(), 1);
-    assert_eq!(cred.update_key.as_ref().unwrap().len(), MaxEntries::default());
+    assert_eq!(
+        cred.update_key.as_ref().unwrap().len(),
+        MaxEntries(access_structure.no_attributes())
+    );
 
-    let another_entry = Entry::new(&[QualifiedAttribute::from(("another entry", ""))]);
+    let another_entry = Entry::new(&[void]);
     let cred = issuer
         .credential()
         .with_entry(root_entry.clone())
@@ -60,20 +76,36 @@ fn test_credential_building() -> Result<()> {
 
 #[test]
 fn offer_tests() -> Result<()> {
-    let issuer = Issuer::default();
-
-    let alice_alias = Alias::new();
-
-    let bobby_alias = Alias::new();
-
-    let charlie_alias = Alias::new();
-
-    let doug_alias = Alias::new();
-
-    let evan_alias = Alias::new();
-
     let age_adult = QualifiedAttribute::from(("AGE", "ADULT"));
     let age_senior = QualifiedAttribute::from(("AGE", "SENIOR"));
+    let void = QualifiedAttribute::from(("VOID", "VOID"));
+    let ent_0 = QualifiedAttribute::from(("ENTRY", "0"));
+    let ent_1 = QualifiedAttribute::from(("ENTRY", "1"));
+
+    let handsome_attribute = QualifiedAttribute::from(("LOOK", "HANDSOME"));
+
+    let mut access_structure = AccessStructure::new();
+    access_structure.add_hierarchy("AGE".to_string())?;
+    access_structure.add_attribute(age_adult.clone(), None)?;
+    access_structure.add_attribute(age_senior.clone(), Some("ADULT"))?;
+
+    access_structure.add_anarchy("VOID".to_string())?;
+    access_structure.add_attribute(void.clone(), None)?;
+
+    access_structure.add_anarchy("LOOK".to_string())?;
+    access_structure.add_attribute(handsome_attribute.clone(), None)?;
+
+    access_structure.add_hierarchy("ENTRY".to_string())?;
+    access_structure.add_attribute(ent_0.clone(), None)?;
+    access_structure.add_attribute(ent_1.clone(), Some("0"))?;
+
+    let issuer = Issuer::setup(None, &access_structure);
+
+    let alice_alias = Alias::new();
+    let bobby_alias = Alias::new();
+    let charlie_alias = Alias::new();
+    let doug_alias = Alias::new();
+    let evan_alias = Alias::new();
 
     let root_entry = Entry::new(&[age_adult.clone(), age_senior]);
 
@@ -100,7 +132,6 @@ fn offer_tests() -> Result<()> {
         .prove(&NONCE);
     assert!(verify_proof(&issuer.public, &proof, &selected_entries, Some(&NONCE)));
 
-    let handsome_attribute = QualifiedAttribute::from(("LOOK", "HANDSOME"));
     let additional_entry = Entry::new(&[handsome_attribute.clone()]);
 
     let (offer, provable_entries) = bobby_alias
@@ -142,14 +173,12 @@ fn offer_tests() -> Result<()> {
         .max_entries(3)
         .open_offer()?;
 
-    let evan_entry = Entry::new(&[QualifiedAttribute::from(("ENTRY", "1"))]);
-
     let evan_cred = evan_alias.accept(&offer)?;
 
     let even_alias_2 = Alias::new();
     let (offer, provable_entries) = evan_alias
         .offer_builder(&evan_cred, &provable_entries)
-        .additional_entry(evan_entry)
+        .additional_entry(Entry::new(&[ent_0]))
         .open_offer()?;
 
     let evan_2_cred = even_alias_2.accept(&offer)?;
@@ -162,7 +191,7 @@ fn offer_tests() -> Result<()> {
 
     let res = even_alias_2
         .offer_builder(&evan_2_cred, &provable_entries)
-        .additional_entry(Entry::new(&[QualifiedAttribute::from(("ENTRY", "MAX"))]))
+        .additional_entry(Entry::new(&[ent_1]))
         .open_offer();
 
     assert!(res.is_err());
@@ -172,7 +201,16 @@ fn offer_tests() -> Result<()> {
 
 #[test]
 fn test_delegate_root_cred() -> Result<()> {
-    let issuer = Issuer::default();
+    let void = QualifiedAttribute::from(("VOID", "VOID"));
+    let del = QualifiedAttribute::from(("TYPE", "DELEGGATED"));
+
+    let mut access_structure = AccessStructure::new();
+    access_structure.add_anarchy("VOID".to_string())?;
+    access_structure.add_attribute(void.clone(), None)?;
+    access_structure.add_anarchy("TYPE".to_string())?;
+    access_structure.add_attribute(del.clone(), None)?;
+
+    let issuer = Issuer::setup(None, &access_structure);
     let alias = Alias::new();
 
     let root_entry = Entry::new(&[]);
@@ -181,27 +219,23 @@ fn test_delegate_root_cred() -> Result<()> {
     let cred = match issuer
         .credential()
         .with_entry(root_entry.clone())
-        .max_entries(&MaxEntries::default()) // DEFAULT_MAX_ENTRIES: usize = 6
+        .max_entries(&MaxEntries::default())
         .issue_to(&alias.alias_proof(&nonce), Some(&nonce))
     {
         Ok(cred) => cred,
         Err(e) => panic!("Error issuing cred: {:?}", e),
     };
 
-    let del_root_entry = QualifiedAttribute::from(("TYPE", "DELEGGATED"));
-
     let (offer, entries) = alias
         .offer_builder(&cred, &[root_entry])
-        .additional_entry(Entry::new(&[del_root_entry.clone()]))
+        .additional_entry(Entry::new(&[del.clone()]))
         .open_offer()?;
 
     let del_alias = Alias::new();
     let del_cred = del_alias.accept(&offer)?;
 
-    let (proof, selected_entries) = del_alias
-        .proof_builder(&del_cred, &entries)
-        .select_attribute(del_root_entry)
-        .prove(&nonce);
+    let (proof, selected_entries) =
+        del_alias.proof_builder(&del_cred, &entries).select_attribute(del).prove(&nonce);
 
     assert!(verify_proof(&issuer.public, &proof, &selected_entries, Some(&nonce)));
 

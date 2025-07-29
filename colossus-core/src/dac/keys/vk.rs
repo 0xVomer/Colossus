@@ -3,7 +3,7 @@ use bls12_381_plus::{G1Affine, G2Affine};
 use bls12_381_plus::{G1Projective, G2Projective};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum VK {
     G1(G1Projective),
     G2(G2Projective),

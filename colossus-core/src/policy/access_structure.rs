@@ -8,7 +8,7 @@ use std::{
     fmt::Debug,
 };
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct AccessStructure {
     dimensions: HashMap<String, super::Dimension>,
 }
@@ -100,6 +100,10 @@ impl AccessStructure {
 
     pub fn dimensions(&self) -> impl Iterator<Item = &str> {
         self.dimensions.keys().map(|d| d.as_str())
+    }
+
+    pub fn no_attributes(&'_ self) -> usize {
+        self.dimensions.values().map(|d| d.nb_attributes()).sum()
     }
 
     pub fn attributes(&'_ self) -> impl '_ + Iterator<Item = QualifiedAttribute> {
