@@ -1,6 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! Test utilities of storage layers implementing the storage primatives for AKD
-
 use super::{manager::StorageManager, traits::Database, types::*};
 use crate::akd::{
     AkdLabel, AkdValue, AzksValue, EMPTY_DIGEST, NodeLabel, errors::StorageError, tree_node::*,
@@ -14,10 +11,6 @@ type Azks = crate::akd::Azks;
 type TreeNode = crate::akd::tree_node::TreeNode;
 type PvTreeNode = crate::akd::tree_node::TreeNodeWithPreviousValue;
 
-// *** Run the test cases for a given data-layer impl *** //
-/// Run the storage-layer test suite for a given storage implementation.
-/// This is public because it can be used by other implemented storage layers
-/// for consistency checks (e.g. mysql, memcached, etc)
 pub async fn run_test_cases_for_storage_impl<S: Database>(db: S) -> StorageManager<S> {
     test_get_and_set_item(&db).await;
     test_user_data(&db).await;
@@ -29,9 +22,7 @@ pub async fn run_test_cases_for_storage_impl<S: Database>(db: S) -> StorageManag
     manager
 }
 
-// *** New Test Helper Functions *** //
 async fn test_get_and_set_item<Ns: Database>(storage: &Ns) {
-    // === Azks storage === //
     let azks = Azks { latest_epoch: 34, num_nodes: 10 };
 
     let set_result = storage.set(DbRecord::Azks(azks.clone())).await;
@@ -44,8 +35,6 @@ async fn test_get_and_set_item<Ns: Database>(storage: &Ns) {
     } else {
         panic!("Failed to retrieve AZKS");
     }
-
-    // === TreeNode storage === //
 
     let node = TreeNode {
         label: NodeLabel::new(byte_arr_from_u64(13), 4),
@@ -86,7 +75,6 @@ async fn test_get_and_set_item<Ns: Database>(storage: &Ns) {
         panic!("Failed to retrieve history tree node (2) {:?}", err)
     }
 
-    // === ValueState storage === //
     let key = ValueStateKey("test".as_bytes().to_vec(), 1);
     let value = ValueState {
         username: AkdLabel::from("test"),
@@ -163,9 +151,7 @@ async fn test_batch_get_items<Ns: Database>(storage: &Ns) {
             );
         },
         Ok(results) => {
-            // correct length, now check the values
             for result in results.into_iter() {
-                // find the initial record with the same username & epoch
                 let initial_record = data
                     .iter()
                     .find(|&x| {
@@ -178,7 +164,7 @@ async fn test_batch_get_items<Ns: Database>(storage: &Ns) {
                         false
                     })
                     .cloned();
-                // assert it matches what was given matches what was retrieved
+
                 assert_eq!(Some(result), initial_record);
             }
         },
@@ -188,7 +174,7 @@ async fn test_batch_get_items<Ns: Database>(storage: &Ns) {
     let got_all_min_states = storage
         .get_user_state_versions(&user_keys, ValueStateRetrievalFlag::MinEpoch)
         .await;
-    // should be the same thing as the previous get
+
     match got_all_min_states {
         Err(err) => panic!("Failed to retrieve batch of user at min epochs: {:?}", err),
         Ok(lst) if lst.len() != rand_users.len() => {
@@ -199,9 +185,7 @@ async fn test_batch_get_items<Ns: Database>(storage: &Ns) {
             );
         },
         Ok(results) => {
-            // correct length, now check the values
             for result in results.into_iter() {
-                // find the initial record with the same username & epoch
                 let initial_record = data
                     .iter()
                     .find(|&x| {
@@ -220,7 +204,6 @@ async fn test_batch_get_items<Ns: Database>(storage: &Ns) {
                         }
                     });
 
-                // assert it matches what was given matches what was retrieved
                 assert_eq!(Some(result.1.0), initial_record);
             }
         },
@@ -229,7 +212,7 @@ async fn test_batch_get_items<Ns: Database>(storage: &Ns) {
     let got_all_max_states = storage
         .get_user_state_versions(&user_keys, ValueStateRetrievalFlag::MaxEpoch)
         .await;
-    // should be the same thing as the previous get
+
     match got_all_max_states {
         Err(err) => panic!("Failed to retrieve batch of user at min epochs: {:?}", err),
         Ok(lst) if lst.len() != rand_users.len() => {
@@ -240,9 +223,7 @@ async fn test_batch_get_items<Ns: Database>(storage: &Ns) {
             );
         },
         Ok(results) => {
-            // correct length, now check the values
             for result in results.into_iter() {
-                // find the initial record with the same username & epoch
                 let initial_record = data
                     .iter()
                     .find(|&x| {
@@ -260,7 +241,7 @@ async fn test_batch_get_items<Ns: Database>(storage: &Ns) {
                             0u64
                         }
                     });
-                // assert it matches what was given matches what was retrieved
+
                 assert_eq!(Some(result.1.0), initial_record);
             }
         },
@@ -385,7 +366,6 @@ async fn test_user_data<S: Database>(storage: &S) {
     let versions = data.states.into_iter().map(|state| state.version).collect::<Vec<_>>();
     assert_eq!(vec![1, 2, 3], versions);
 
-    // At this point the DB has structure (for MySQL):
     /*
     mysql> USE default;
     Reading table information for completion of table and column names
@@ -491,8 +471,6 @@ async fn test_user_data<S: Database>(storage: &S) {
         specific_result
     );
 
-    // Vector operations
-
     let mut vector_of_states = vec![sample_state_2.clone()];
     sample_state_2.version = 2;
     sample_state_2.epoch = 234;
@@ -538,7 +516,6 @@ async fn test_tombstoning_data<S: Database>(
     let mut sample_state2 = sample_state.clone();
     sample_state2.username = AkdLabel::from("tombstone_test_user");
 
-    // Load up a bunch of data into the storage layer
     for i in 0..5 {
         sample_state.version = i;
         sample_state.epoch = i;
@@ -554,11 +531,9 @@ async fn test_tombstoning_data<S: Database>(
     let data = storage.get_user_data(&sample_state2.username).await.unwrap();
     assert_eq!(5, data.states.len());
 
-    // tombstone up until given epochs
     storage.tombstone_value_states(&sample_state.username, 1).await?;
     storage.tombstone_value_states(&sample_state2.username, 2).await?;
 
-    // check that correct records are tombstoned
     storage
         .get_user_data(&sample_state.username)
         .await?
@@ -566,10 +541,8 @@ async fn test_tombstoning_data<S: Database>(
         .iter()
         .for_each(|value_state| {
             if value_state.epoch <= 1 {
-                // should be a tombstone
                 assert_eq!(crate::akd::TOMBSTONE.to_vec(), value_state.value.0);
             } else {
-                // should NOT be a tombstone
                 assert_ne!(crate::akd::TOMBSTONE.to_vec(), value_state.value.0);
             }
         });
@@ -581,18 +554,14 @@ async fn test_tombstoning_data<S: Database>(
         .iter()
         .for_each(|value_state| {
             if value_state.epoch <= 2 {
-                // should be a tombstone
                 assert_eq!(crate::akd::TOMBSTONE.to_vec(), value_state.value.0);
             } else {
-                // should NOT be a tombstone
                 assert_ne!(crate::akd::TOMBSTONE.to_vec(), value_state.value.0);
             }
         });
 
     Ok(())
 }
-
-// *** Tests *** //
 
 #[cfg(test)]
 mod memory_storage_tests {

@@ -1,8 +1,8 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-// This contains the protobuf definition for inter-node messaging structures
 
-// To re-generate the protobuf specifications, utilize the build.rs script in this
-// crate (See Cargo.toml file)
+
+
+
+
 
 syntax = "proto2";
 

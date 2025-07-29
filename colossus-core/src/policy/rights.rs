@@ -2,7 +2,6 @@ use super::Error;
 use cosmian_crypto_core::bytes_ser_de::{Deserializer, Serializable, Serializer, to_leb128_len};
 use std::ops::Deref;
 
-/// A right is a combination of the IDs of its associated attributes.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub struct Right(pub(crate) Vec<u8>);
 
@@ -27,15 +26,9 @@ impl From<&[u8]> for Right {
 }
 
 impl Right {
-    /// Returns the right associated to the given point.
-    ///
-    /// A point is defined as a sequence of attribute IDs while a right is some compact
-    /// representation of it, that is a fixed-point for the permutation.
     pub fn from_point(mut attribute_ids: Vec<usize>) -> Result<Self, Error> {
-        // A set of attribute has no order. Enforcing an order here allows having a unique
-        // representation for all permutations.
         attribute_ids.sort_unstable();
-        // Allocate an upper-bound on the actual space required.
+
         let mut ser = Serializer::with_capacity(4 * attribute_ids.len());
         for value in attribute_ids {
             ser.write_leb128_u64(u64::try_from(value)?)?;

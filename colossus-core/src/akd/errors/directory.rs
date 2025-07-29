@@ -1,18 +1,16 @@
 use super::VerificationError;
 
-/// The errors thrown by various algorithms in [crate::directory::Directory]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 pub enum DirectoryError {
-    /// A verification error occurred
     Verification(VerificationError),
-    /// Tried to perform an operation on an invalid epoch or epoch range
+
     InvalidEpoch(String),
-    /// AZKS not found in read-only directory mode
+
     ReadOnlyDirectory(String),
-    /// Publish
+
     Publish(String),
-    /// Detected an invalid version
+
     InvalidVersion(String),
 }
 

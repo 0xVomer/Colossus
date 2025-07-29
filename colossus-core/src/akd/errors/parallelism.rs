@@ -1,8 +1,6 @@
-/// The errors thrown by parallel code
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 pub enum ParallelismError {
-    /// A tokio task join error
     JoinErr(String),
 }
 

@@ -9,46 +9,6 @@ use itertools::Itertools;
 use rand::{RngCore, SeedableRng, rngs::StdRng, seq::SliceRandom};
 use std::time::Duration;
 
-// #[cfg(feature = "greedy_lookup_preload")]
-// test_config!(test_maximal_node_set_resolution);
-// #[cfg(feature = "greedy_lookup_preload")]
-// async fn test_maximal_node_set_resolution<TC: Configuration>() -> Result<(), AkdError> {
-//     let mut rng = StdRng::seed_from_u64(42);
-//     let database = AsyncInMemoryDatabase::new();
-//     let db = StorageManager::new_no_cache(database);
-//     let azks1 = Azks::new::<TC, _>(&db).await.unwrap();
-//     let label = NodeLabel {
-//         label_len: 256,
-//         label_val: [
-//             1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1,
-//             0, 1, 0, 1,
-//         ],
-//     };
-
-//     let lookup_info = LookupInfo {
-//         existent_label: label,
-//         marker_label: label,
-//         marker_version: 1,
-//         non_existent_label: label,
-//         value_state: crate::storage::types::ValueState {
-//             epoch: 1,
-//             label,
-//             username: crate::AkdLabel::random(&mut rng),
-//             value: crate::AkdValue::random(&mut rng),
-//             version: 1,
-//         },
-//     };
-
-//     let max_set = azks1
-//         .build_lookup_maximal_node_set(&db, lookup_info)
-//         .await
-//         .expect("Failed to build maximal set");
-
-//     // since the label is there 3 times, it should all resolve to the same data
-//     assert_eq!(256, max_set.len());
-//     Ok(())
-// }
-
 test_config!(test_batch_insert_basic);
 async fn test_batch_insert_basic<TC: Configuration>() -> Result<(), AkdError> {
     let mut rng = StdRng::seed_from_u64(42);
@@ -105,7 +65,6 @@ async fn test_batch_insert_root_hash<TC: Configuration>() -> Result<(), AkdError
     let database = AsyncInMemoryDatabase::new();
     let db = StorageManager::new_no_cache(database);
 
-    // manually construct a 3-layer tree and compute the root hash
     let mut nodes = Vec::<AzksElement>::new();
     let mut leaves = Vec::<TreeNode>::new();
     let mut leaf_hashes = Vec::new();
@@ -160,7 +119,6 @@ async fn test_batch_insert_root_hash<TC: Configuration>() -> Result<(), AkdError
         &layer_2_hashes[1].1,
     ));
 
-    // create a 3-layer tree with batch insert operations and get root hash
     let mut azks = Azks::new::<TC, _>(&db).await?;
     for i in 0..8 {
         let node = nodes[7 - i];
@@ -175,7 +133,6 @@ async fn test_batch_insert_root_hash<TC: Configuration>() -> Result<(), AkdError
 
     let root_digest = azks.get_root_hash::<TC, _>(&db).await.unwrap();
 
-    // assert root hash from batch insert matches manually computed root hash
     assert_eq!(root_digest, expected, "Root hash not equal to expected");
     Ok(())
 }
@@ -208,7 +165,6 @@ async fn test_insert_permuted<TC: Configuration>() -> Result<(), AkdError> {
         root_node.write_to_storage(&db, is_new).await?;
     }
 
-    // Try randomly permuting
     azks_element_set.shuffle(&mut rng);
 
     let database2 = AsyncInMemoryDatabase::new();
@@ -239,7 +195,6 @@ async fn test_insert_num_nodes<TC: Configuration>() -> Result<(), AkdError> {
     let db = StorageManager::new_no_cache(database.clone());
     let mut azks = Azks::new::<TC, _>(&db).await?;
 
-    // expected nodes inserted: 1 root
     let expected_num_nodes = 1;
     let azks_num_nodes = azks.num_nodes;
     let database_num_nodes =
@@ -248,7 +203,6 @@ async fn test_insert_num_nodes<TC: Configuration>() -> Result<(), AkdError> {
     assert_eq!(expected_num_nodes, azks_num_nodes);
     assert_eq!(expected_num_nodes, database_num_nodes);
 
-    // insert 3 leaves
     let nodes = vec![
         NodeLabel::new(byte_arr_from_u64(0b0110 << 60), 64),
         NodeLabel::new(byte_arr_from_u64(0b0111 << 60), 64),
@@ -266,11 +220,6 @@ async fn test_insert_num_nodes<TC: Configuration>() -> Result<(), AkdError> {
     )
     .await?;
 
-    // expected nodes inserted: 3 leaves, 2 internal nodes
-    //                   -
-    //          0
-    //    0010     011
-    //          0110  0111
     let expected_num_nodes = 5 + 1;
     let azks_num_nodes = azks.num_nodes;
     let database_num_nodes =
@@ -279,7 +228,6 @@ async fn test_insert_num_nodes<TC: Configuration>() -> Result<(), AkdError> {
     assert_eq!(expected_num_nodes, azks_num_nodes);
     assert_eq!(expected_num_nodes, database_num_nodes);
 
-    // insert another 3 leaves
     let nodes = vec![
         NodeLabel::new(byte_arr_from_u64(0b1000 << 60), 64),
         NodeLabel::new(byte_arr_from_u64(0b0110 << 60), 64),
@@ -297,11 +245,6 @@ async fn test_insert_num_nodes<TC: Configuration>() -> Result<(), AkdError> {
     )
     .await?;
 
-    // expected nodes inserted: 2 leaves, 1 internal node
-    //                   -
-    //          -               1000
-    //    001         -
-    //  -  0011     -   -
     let expected_num_nodes = 3 + 5 + 1;
     let azks_num_nodes = azks.num_nodes;
     let database_num_nodes =
@@ -321,7 +264,6 @@ async fn test_preload_nodes_accuracy<TC: Configuration>() -> Result<(), AkdError
     let mut azks = Azks::new::<TC, _>(&storage_manager).await.expect("Failed to create azks!");
     azks.increment_epoch();
 
-    // Construct our tree
     let root_label = NodeLabel::root();
 
     let left_label = NodeLabel::new(byte_arr_from_u64(1), 1);
@@ -357,13 +299,11 @@ async fn test_preload_nodes_accuracy<TC: Configuration>() -> Result<(), AkdError
         hash: AzksValue(EMPTY_DIGEST),
     }));
 
-    // Seed the database and cache with our tree
     storage_manager
         .batch_set(vec![root, left, right])
         .await
         .expect("Failed to seed database for preload test");
 
-    // Preload nodes to populate storage manager cache
     let azks_element_set = AzksElementSet::from(vec![
         AzksElement {
             label: root_label,
@@ -396,7 +336,6 @@ async fn test_preload_nodes_accuracy<TC: Configuration>() -> Result<(), AkdError
         "Preload count returned unexpected value!"
     );
 
-    // Test preload with parallelism disabled
     let actual_preload_count = azks
         .preload_nodes(&storage_manager, &azks_element_set, AzksParallelismConfig::disabled())
         .await
@@ -417,7 +356,6 @@ async fn test_azks_element_set_partition<TC: Configuration>() -> Result<(), AkdE
     let mut azks1 = Azks::new::<TC, _>(&db).await?;
     azks1.increment_epoch();
 
-    // manually construct both types of node sets with the same data
     let mut rng = StdRng::seed_from_u64(42);
     let nodes = gen_random_elements(num_nodes, &mut rng);
     let unsorted_set = AzksElementSet::Unsorted(nodes.clone());
@@ -427,7 +365,6 @@ async fn test_azks_element_set_partition<TC: Configuration>() -> Result<(), AkdE
         AzksElementSet::BinarySearchable(nodes)
     };
 
-    // assert that node sets always return the same partitions
     let assert_fun = |prefix_label: NodeLabel| match (
         unsorted_set.clone().partition(prefix_label),
         bin_searchable_set.clone().partition(prefix_label),
@@ -469,7 +406,6 @@ async fn test_azks_element_set_get_longest_common_prefix<TC: Configuration>() ->
     let mut azks1 = Azks::new::<TC, _>(&db).await?;
     azks1.increment_epoch();
 
-    // manually construct both types of node sets with the same data
     let mut rng = StdRng::seed_from_u64(42);
     let nodes = gen_random_elements(num_nodes, &mut rng);
     let unsorted_set = AzksElementSet::Unsorted(nodes.clone());
@@ -479,7 +415,6 @@ async fn test_azks_element_set_get_longest_common_prefix<TC: Configuration>() ->
         AzksElementSet::BinarySearchable(nodes)
     };
 
-    // assert that node sets always return the same LCP
     assert_eq!(
         unsorted_set.get_longest_common_prefix::<TC>(),
         bin_searchable_set.get_longest_common_prefix::<TC>()
@@ -503,7 +438,6 @@ async fn test_get_child_azks_element<TC: Configuration>() -> Result<(), AkdError
         azks_element_set.push(node);
     }
 
-    // Try tests against all permutations of the set
     for perm in azks_element_set.into_iter().permutations(num_nodes) {
         let database = AsyncInMemoryDatabase::new();
         let db = StorageManager::new_no_cache(database);
@@ -516,7 +450,6 @@ async fn test_get_child_azks_element<TC: Configuration>() -> Result<(), AkdError
         )
         .await?;
 
-        // Recursively traverse the tree and check that the sibling of each node is correct
         let root_node = TreeNode::get_from_storage(&db, &NodeKey(NodeLabel::root()), 1).await?;
         let mut nodes: Vec<TreeNode> = vec![root_node];
         while let Some(current_node) = nodes.pop() {
@@ -554,7 +487,6 @@ async fn test_membership_proof_permuted<TC: Configuration>() -> Result<(), AkdEr
     let mut rng = StdRng::seed_from_u64(42);
     let mut azks_element_set = gen_random_elements(num_nodes, &mut rng);
 
-    // Try randomly permuting
     azks_element_set.shuffle(&mut rng);
     let database = AsyncInMemoryDatabase::new();
     let db = StorageManager::new_no_cache(database);
@@ -612,7 +544,6 @@ async fn test_membership_proof_failing<TC: Configuration>() -> Result<(), AkdErr
     let mut rng = StdRng::seed_from_u64(42);
     let mut azks_element_set = gen_random_elements(num_nodes, &mut rng);
 
-    // Try randomly permuting
     azks_element_set.shuffle(&mut rng);
     let database = AsyncInMemoryDatabase::new();
     let db = StorageManager::new_no_cache(database);
@@ -687,7 +618,6 @@ async fn test_nonmembership_proof_intermediate<TC: Configuration>() -> Result<()
     Ok(())
 }
 
-// This test checks that a non-membership proof in a tree with 1 leaf verifies.
 test_config!(test_nonmembership_proof_very_small);
 async fn test_nonmembership_proof_very_small<TC: Configuration>() -> Result<(), AkdError> {
     let num_nodes = 2;
@@ -721,8 +651,6 @@ async fn test_nonmembership_proof_very_small<TC: Configuration>() -> Result<(), 
     Ok(())
 }
 
-// This test verifies if a non-membership proof in a small tree of 2 leaves
-// verifies.
 test_config!(test_nonmembership_proof_small);
 async fn test_nonmembership_proof_small<TC: Configuration>() -> Result<(), AkdError> {
     let num_nodes = 3;

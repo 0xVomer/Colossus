@@ -1,12 +1,10 @@
-/// An error thrown by the Azks data structure.
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 pub enum AzksError {
-    /// Membership proof did not verify
     VerifyMembershipProof(String),
-    /// Append-only proof did not verify
+
     VerifyAppendOnlyProof,
-    /// Thrown when a place where an epoch is needed wasn't provided one.
+
     NoEpochGiven,
 }
 

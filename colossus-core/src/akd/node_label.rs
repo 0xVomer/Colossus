@@ -1,7 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! This module contains the specifics for NodeLabel only, other types don't have the
-//! same level of detail and aren't broken into sub-modules
-
 pub use super::{
     Bit, PrefixOrdering,
     serde_helpers::{bytes_deserialize_hex, bytes_serialize_hex},
@@ -11,15 +7,12 @@ use alloc::{format, string::String, vec::Vec};
 use rand::random;
 use serde::{Deserialize, Serialize};
 
-/// Represents the label of an AKD node
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeLabel {
     #[serde(serialize_with = "bytes_serialize_hex")]
     #[serde(deserialize_with = "bytes_deserialize_hex")]
-
-    /// Stores a binary string as a 32-byte array of `u8`s
     pub label_val: [u8; 32],
-    /// len keeps track of how long the binary string is in bits
+
     pub label_len: u32,
 }
 
@@ -37,7 +30,6 @@ impl PartialOrd for NodeLabel {
 
 impl Ord for NodeLabel {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        // `label_len`, `label_val`
         let len_cmp = self.label_len.cmp(&other.label_len);
         if let core::cmp::Ordering::Equal = len_cmp {
             self.label_val.cmp(&other.label_val)
@@ -54,7 +46,6 @@ impl core::fmt::Display for NodeLabel {
 }
 
 impl NodeLabel {
-    /// Returns the value of the [NodeLabel]
     pub fn value<TC: Configuration>(&self) -> Vec<u8> {
         TC::compute_node_label_value(&self.to_bytes())
     }
@@ -63,7 +54,6 @@ impl NodeLabel {
         [&self.label_len.to_be_bytes(), &self.label_val[..]].concat()
     }
 
-    /// Outputs whether or not self is a prefix of the other [NodeLabel]
     pub fn is_prefix_of(&self, other: &Self) -> bool {
         if self.label_len > other.label_len {
             return false;
@@ -71,8 +61,6 @@ impl NodeLabel {
         (0..self.label_len).all(|i| self.get_bit_at(i) == other.get_bit_at(i))
     }
 
-    /// Takes as input a pointer to the caller and another [NodeLabel],
-    /// returns a [NodeLabel] that is the longest common prefix of the two.
     pub fn get_longest_common_prefix<TC: Configuration>(&self, other: NodeLabel) -> Self {
         let empty_label = TC::empty_label();
         if *self == empty_label || other == empty_label {
@@ -95,22 +83,6 @@ impl NodeLabel {
         self.get_prefix(prefix_len)
     }
 
-    /// Returns the bit at a specified index (either a 0 or a 1). Will
-    /// throw an error if the index is out of range
-    /// (exceeds or is equal to the length of the label in bits)
-    ///
-    /// Note that this is calculated from the right, for example:
-    /// let mut label = [0u8; 32];
-    /// label[0] = 0b10100000u8;
-    /// We should get outputs as follows:
-    /// * label.get_bit_at(0) = 1
-    /// * label.get_bit_at(1) = 0
-    /// * label.get_bit_at(2) = 1
-    /// * label.get_bit_at(3) = 0
-    /// * label.get_bit_at(4) = 0
-    /// * label.get_bit_at(5) = 0
-    /// * label.get_bit_at(6) = 0
-    /// * label.get_bit_at(7) = 0
     pub fn get_bit_at(&self, index: u32) -> Result<Bit, String> {
         if index >= self.label_len {
             return Err(format!(
@@ -122,7 +94,6 @@ impl NodeLabel {
         get_bit_from_slice(&self.label_val, index)
     }
 
-    /// Returns the prefix of a specified length, and the entire value if the length is >= 256
     pub fn get_prefix(&self, len: u32) -> Self {
         if len >= 256 {
             return *self;
@@ -142,36 +113,27 @@ impl NodeLabel {
         Self { label_val: out_val, label_len: len }
     }
 
-    /// Creates a new NodeLabel representing the root.
     pub fn root() -> Self {
         Self::new([0u8; 32], 0)
     }
 
-    /// Creates a new [NodeLabel] with the given value and len (in bits).
     pub fn new(val: [u8; 32], len: u32) -> Self {
         NodeLabel { label_val: val, label_len: len }
     }
 
-    /// Gets the length of a NodeLabel in bits.
     pub fn get_len(&self) -> u32 {
         self.label_len
     }
 
-    /// Gets the value of a NodeLabel.
     pub fn get_val(&self) -> [u8; 32] {
         self.label_val
     }
 
-    /// Gets the prefix ordering of other with respect to self, if self is a prefix of other.
-    /// If self is not a prefix of other, then this returns [PrefixOrdering::Invalid].
     pub fn get_prefix_ordering(&self, other: Self) -> PrefixOrdering {
         if self.get_len() >= other.get_len() {
             return PrefixOrdering::Invalid;
         }
         if other.get_prefix(self.get_len()) != self.get_prefix(self.get_len()) {
-            // Note: we check self.get_prefix(self.get_len()) here instead of just *self
-            // because equality checks for a [NodeLabel] do not ignore the bits of label_val set
-            // beyond label_len.
             return PrefixOrdering::Invalid;
         }
         if let Ok(bit) = other.get_bit_at(self.get_len()) {
@@ -182,10 +144,6 @@ impl NodeLabel {
     }
 }
 
-/// Returns the bit at a specified index (either a 0 or a 1) of a slice of bytes
-///
-/// If the index is out of range (exceeds or is equal to the length of the input in bytes * 8),
-/// returns an error
 fn get_bit_from_slice(input: &[u8], index: u32) -> Result<Bit, String> {
     if (input.len() as u32) * 8 <= index {
         return Err(format!("Input is too short: index = {index}, input.len() = {}", input.len()));
@@ -200,15 +158,10 @@ fn get_bit_from_slice(input: &[u8], index: u32) -> Result<Bit, String> {
     }
 }
 
-// ================= Test helpers ================= //
-
 pub fn random_label() -> NodeLabel {
     NodeLabel { label_val: random(), label_len: 256 }
 }
 
-// Creates a byte array of 32 bytes from a u64
-// Note that this representation is big-endian, and
-// places the bits to the front of the output byte_array.
 pub fn byte_arr_from_u64(input_int: u64) -> [u8; 32] {
     let mut output_arr = [0u8; 32];
     let input_arr = input_int.to_be_bytes();
@@ -216,9 +169,6 @@ pub fn byte_arr_from_u64(input_int: u64) -> [u8; 32] {
     output_arr
 }
 
-// Creates a byte array of 32 bytes from a u64
-// Note that this representation is little-endian, and
-// places the bits to the front of the output byte_array.
 pub fn byte_arr_from_u64_le(input_int: u64) -> [u8; 32] {
     let mut output_arr = [0u8; 32];
     let input_arr = input_int.to_be_bytes();
@@ -230,9 +180,6 @@ pub fn byte_arr_from_u64_le(input_int: u64) -> [u8; 32] {
 mod test {
     use super::*;
 
-    // This test tests get_bit_at on a small label of len 4.
-    // The label is logically equal to the binary string "1010"
-    // and should return the corresponding bits.
     #[test]
     fn test_get_bit_at_small() {
         let val = 0b1010u64 << 60;
@@ -252,8 +199,6 @@ mod test {
         }
     }
 
-    // In this test, we have a label of length 256, logically equal to
-    // 1 followed by 255 0s. We want to make sure its 0th bit is read out as 1.
     #[test]
     fn test_get_bit_at_medium_1() {
         let val = 0b1u64 << 63;
@@ -267,10 +212,6 @@ mod test {
         )
     }
 
-    // In this test, we have a label of length 256, logically equal to
-    // 1 followed by 255 0s. We want to make sure its 190th bit is read out as 0.
-    // We have this because the string itself has only one non-zero bit and we still want
-    // to check beyond the 0th index.
     #[test]
     fn test_get_bit_at_medium_2() {
         let val = 0b1u64 << 63;
@@ -284,19 +225,14 @@ mod test {
         )
     }
 
-    // This test creates a label of length 256 logically equal to
-    // "0000 0000 0000 0000 1010 0000" followed by all 0s. We know that the
-    // first non-zero bit is at position 16, and we want to check that.
     #[test]
     fn test_get_bit_at_large() {
         let mut val = [0u8; 32];
-        // 128u8 = 0b1000 0000u8 and 32u8 = 0b10 0000u8, hence their
-        // sum is "1010 0000"
+
         val[2] = 128u8 + 32u8;
-        // create the label
+
         let label = NodeLabel::new(val, 256);
-        // val[2] is positions 16-23 (both included),
-        // so we want to check everything till there.
+
         let expected_raw =
             vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0];
         let expected = expected_raw
@@ -304,7 +240,6 @@ mod test {
             .map(|x| if *x == 0 { Bit::Zero } else { Bit::One })
             .collect::<Vec<Bit>>();
 
-        // the vector expected covers the first 24 indices.
         for (index, item) in expected.iter().enumerate().take(24) {
             let index_32 = index as u32;
             assert!(
@@ -315,7 +250,7 @@ mod test {
                 label.get_bit_at(index_32)
             )
         }
-        // Everything after the first 24 indixes is 0
+
         for index in 24..256 {
             let index_32 = index as u32;
             assert!(
@@ -328,15 +263,8 @@ mod test {
         }
     }
 
-    // This test is testing our helper function byte_arr_from_u64, which
-    // we mainly use for testing. Still we want it to be correct!
-    // We call it "small" since it only tests what would
-    // result in 1 non-zero byte.
     #[test]
     fn test_byte_arr_from_u64_small() {
-        // This val is 2 copies of "10" followed by all 0s.
-        // This should be converted into the byte array of all 0s
-        // but with the first two byte 0b10100000u8.
         let val = 0b1010u64 << 60;
         let mut expected = [0u8; 32];
         expected[0] = 0b10100000u8;
@@ -348,14 +276,8 @@ mod test {
         )
     }
 
-    // This test is testing our helper function byte_arr_from_u64, which
-    // we mainly use for testing. Still we want it to be correct!
-    // It is only testing for 2 non-zero bytes.
     #[test]
     fn test_byte_arr_from_u64_medium() {
-        // This val is 6 copies of "10" followed by all 0s.
-        // This should be converted into the byte array of all 0s
-        // but with the first two bytes 0b10101010u8 and 0b10100000u8.
         let val = 0b101010101010u64 << 52;
         let mut expected = [0u8; 32];
         expected[0] = 0b10101010u8;
@@ -368,13 +290,8 @@ mod test {
         )
     }
 
-    // This test is testing our helper function byte_arr_from_u64, which
-    // we mainly use for testing. Still we want it to be correct!
-    // It is only testing for 3 non-zero bytes.
     #[test]
     fn test_byte_arr_from_u64_larger() {
-        // This string was hand-generated for testing so that
-        // all three non-zero bytes were distinct.
         let val = 0b01011010101101010101010u64 << 41;
         let mut expected = [0u8; 32];
         expected[0] = 0b01011010u8;
@@ -389,7 +306,6 @@ mod test {
         )
     }
 
-    // Test two NodeLabels for equality, when their leading bit is 1.
     #[test]
     fn test_node_label_equal_leading_one() {
         let label_1 = NodeLabel::new(byte_arr_from_u64(10000000u64 << 56), 8u32);
@@ -397,7 +313,6 @@ mod test {
         assert!(label_1 == label_2, "Identical labels with leading one not found equal!")
     }
 
-    // Test two NodeLabels for equality, when their leading bit is 0.
     #[test]
     fn test_node_label_equal_leading_zero() {
         let label_1 = NodeLabel::new(byte_arr_from_u64(100000000u64 << 55), 9u32);
@@ -405,7 +320,6 @@ mod test {
         assert!(label_1 == label_2, "Identical labels with leading zero not found equal!")
     }
 
-    // Test two NodeLabels for inequality, when their leading bit is 1.
     #[test]
     fn test_node_label_unequal_values() {
         let label_1 = NodeLabel::new(byte_arr_from_u64(10000000u64), 9u32);
@@ -413,7 +327,6 @@ mod test {
         assert!(label_1 != label_2, "Unequal labels found equal!")
     }
 
-    // Test two NodeLabels for inequality due to differing length, when their leading bit is 1.
     #[test]
     fn test_node_label_equal_values_unequal_len() {
         let label_1 = NodeLabel::new(byte_arr_from_u64(10000000u64 << 56), 8u32);
@@ -421,7 +334,6 @@ mod test {
         assert!(label_1 != label_2, "Identical labels with unequal lengths not found equal!")
     }
 
-    // This test gets a prefix for a hard-coded random string and makes sure it is equal to a hand-computed value.
     #[test]
     fn test_get_prefix_ordering_with_invalid_bits() {
         let invalid_label = NodeLabel::new(
@@ -431,23 +343,18 @@ mod test {
             1u32,
         );
 
-        // Simple test case
         let some_label = NodeLabel::new(byte_arr_from_u64(0u64), 64u32);
         assert_eq!(invalid_label.get_prefix_ordering(some_label), PrefixOrdering::WithZero);
 
-        // Zero-length label should not return PrefixOrdering::Invalid
         let zero_length_invalid_bits_label = NodeLabel::new(byte_arr_from_u64(1), 0);
         assert_eq!(
             zero_length_invalid_bits_label.get_prefix_ordering(some_label),
             PrefixOrdering::WithZero
         );
     }
-    // This test just serves as another example of get_dir and this time we want to use little endian encoding
-    // since we are using more complex u64 values.
+
     #[test]
     fn test_get_dir_example() {
-        // 23 in little endian is 10111 and 10049430782486799941u64 begins with
-        // the prefix 00110100, hence, label_1 is not a prefix of label_2.
         let label_1 = NodeLabel::new(byte_arr_from_u64_le(10049430782486799941u64), 64u32);
         let label_2 = NodeLabel::new(byte_arr_from_u64_le(23u64), 5u32);
         let expected = PrefixOrdering::Invalid;
@@ -459,7 +366,6 @@ mod test {
         )
     }
 
-    // This test gets a prefix for a hard-coded random string and makes sure it is equal to a hand-computed value.
     #[test]
     fn test_get_prefix_small() {
         let label_1 = NodeLabel::new(

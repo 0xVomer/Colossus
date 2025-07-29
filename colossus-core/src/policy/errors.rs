@@ -1,5 +1,3 @@
-//! Cryptographic related Errors
-
 use core::{fmt::Display, num::TryFromIntError};
 
 use cosmian_crypto_core::CryptoCoreError;

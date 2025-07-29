@@ -1,6 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! Base functionality for verification operations (membership, non-membership, etc)
-
 use super::{
     AkdLabel, AkdValue, AzksValue, Configuration, Digest, Direction, MembershipProof, NodeLabel,
     NonMembershipProof, Proof, VerificationError, VersionFreshness, VrfError,
@@ -9,10 +6,6 @@ use alloc::format;
 use alloc::string::ToString;
 use core::convert::TryFrom;
 
-/// Verifies a membership proof with respect to a root hash
-///
-/// Note: this function is only exposed for testing purposes and not meant to be used
-/// in a production setting on its own
 pub fn verify_membership_for_tests_only<TC: Configuration>(
     root_hash: Digest,
     proof: &MembershipProof,
@@ -52,10 +45,6 @@ pub(crate) fn verify_membership<TC: Configuration>(
     }
 }
 
-/// Verifies a non-membership proof with respect to a root hash
-///
-/// Note: this function is only exposed for testing purposes and not meant to be used
-/// in a production setting on its own
 pub fn verify_nonmembership_for_tests_only<TC: Configuration>(
     root_hash: Digest,
     proof: &NonMembershipProof,
@@ -67,7 +56,6 @@ pub(crate) fn verify_nonmembership<TC: Configuration>(
     root_hash: Digest,
     proof: &NonMembershipProof,
 ) -> Result<(), VerificationError> {
-    // Verify that the proof's label is not equal to either of the children's labels
     if proof.label == proof.longest_prefix_children[0].label
         || proof.label == proof.longest_prefix_children[1].label
     {
@@ -76,20 +64,16 @@ pub(crate) fn verify_nonmembership<TC: Configuration>(
         ));
     }
 
-    // Verify that proof.longest_prefix is a prefix of the proof's label
     if !proof.longest_prefix.is_prefix_of(&proof.label) {
         return Err(VerificationError::NonMembershipProof(
             "Proof's longest prefix is not a prefix of the proof's label".to_string(),
         ));
     }
 
-    // Verify that proof.longest_prefix is the longest common prefix of the children
     let mut lcp_children = proof.longest_prefix_children[0]
         .label
         .get_longest_common_prefix::<TC>(proof.longest_prefix_children[1].label);
     if lcp_children == TC::empty_label() {
-        // This is a special case that only occurs when the lcp is the root node and
-        // it is missing one of its children
         lcp_children = NodeLabel::root();
     }
     if proof.longest_prefix != lcp_children {
@@ -116,9 +100,6 @@ pub(crate) fn verify_nonmembership<TC: Configuration>(
     Ok(())
 }
 
-/// This function is called to verify that a given [NodeLabel] is indeed
-/// the VRF for a given version (fresh or stale) for a [AkdLabel].
-/// Hence, it also takes as input the server's public key.
 fn verify_label<TC: Configuration>(
     vrf_public_key: &[u8],
     akd_label: &AkdLabel,
@@ -130,7 +111,6 @@ fn verify_label<TC: Configuration>(
     let vrf_pk = super::VRFPublicKey::try_from(vrf_public_key)?;
     let hashed_label = TC::get_hash_from_label_input(akd_label, freshness, version);
 
-    // VRF proof verification (returns VRF hash output)
     let proof = Proof::try_from(vrf_proof)?;
     vrf_pk.verify(&proof, &hashed_label)?;
     let output: super::Output = (&proof).into();

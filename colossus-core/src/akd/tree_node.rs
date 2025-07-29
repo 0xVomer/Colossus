@@ -1,6 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! The implementation of a node for a history patricia tree
-
 use super::{
     Direction, PrefixOrdering,
     azks::AzksValue,
@@ -24,19 +21,12 @@ use std::{
     marker::Sync,
 };
 
-/// There are three types of nodes: root, leaf and interior.
-/// This enum is used to mark the type of a [TreeNode].
 #[derive(Eq, PartialEq, Debug, Copy, Clone, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TreeNodeType {
-    /// Nodes with this type only have dummy children. Their value is
-    /// an input when they're created and the hash is H(value, creation_epoch)
     Leaf = 1,
-    /// Nodes with this type do not have parents and their value,
-    /// like Interior, is a hash of their children's
-    /// hash along with their respective labels.
+
     Root = 2,
-    /// Nodes of this type must have non-dummy children
-    /// and their value is a hash of their children, along with the labels of the children.
+
     Interior = 3,
 }
 
@@ -57,27 +47,13 @@ impl TreeNodeType {
     }
 }
 
-/// Represents a [TreeNode] with its current state and potential future state.
-/// Depending on the `epoch` which the Directory believes is the "most current"
-/// version, we may need to load a slightly older version of the tree node. This is because
-/// we can't guarantee that a "publish" operation is globally atomic at the storage layer,
-/// however we do assume record-level atomicity. This means that some records may be updated
-/// to "future" values, and therefore we might need to temporarily read their previous values.
-///
-/// The Directory publishes the AZKS after all other records are successfully written.
-/// This single record is where the "current" epoch is determined, so any instances with read-only
-/// access (example: Directory instances service proof generation, but not publishing) will be notified
-/// that a new epoch is available, flush their caches, and retrieve data from storage directly again.
-///
-/// This structure holds the label along with the current value & epoch - 1
 #[derive(Debug, Eq, PartialEq, Clone, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct TreeNodeWithPreviousValue {
-    /// The label of the node
     pub label: NodeLabel,
-    /// The "latest" node, either future or current
+
     pub latest_node: TreeNode,
-    /// The "previous" node, either current or past
+
     pub previous_node: Option<TreeNode>,
 }
 
@@ -125,21 +101,14 @@ impl Storable for TreeNodeWithPreviousValue {
 }
 
 impl TreeNodeWithPreviousValue {
-    /// Determine which of the previous + latest nodes to retrieve based on the
-    /// target epoch. If it should be older than the latest node, and there is no
-    /// previous node, it returns Not Found
     pub(crate) fn determine_node_to_get(
         &self,
         target_epoch: u64,
     ) -> Result<TreeNode, StorageError> {
-        // If a publish is currently underway, and "some" nodes have been updated to future values
-        // our "target_epoch" may point to some older data. Therefore we may need to load a previous
-        // version of this node.
         if self.latest_node.last_epoch > target_epoch {
             if let Some(previous_node) = &self.previous_node {
                 Ok(previous_node.clone())
             } else {
-                // no previous, return not found
                 Err(StorageError::NotFound(format!(
                     "TreeNode {:?} at epoch {}",
                     NodeKey(self.label),
@@ -147,14 +116,10 @@ impl TreeNodeWithPreviousValue {
                 )))
             }
         } else {
-            // Otherwise the currently targeted epoch just points to the most up-to-date value, retrieve that
             Ok(self.latest_node.clone())
         }
     }
 
-    /// Construct a TreeNode with "previous" value where the
-    /// previous value is None. This is useful for the first
-    /// time a node appears in the directory data layer.
     pub(crate) fn from_tree_node(node: TreeNode) -> Self {
         Self {
             label: node.label,
@@ -190,8 +155,6 @@ impl TreeNodeWithPreviousValue {
         let mut nodes = Vec::<TreeNode>::new();
         for node in node_records.into_iter() {
             if let DbRecord::TreeNode(node) = node {
-                // Since this is a batch-get, we should ignore node's not-found and just not add them
-                // to the result-set
                 if let Ok(correct_node) = node.determine_node_to_get(target_epoch) {
                     nodes.push(correct_node);
                 }
@@ -205,30 +168,23 @@ impl TreeNodeWithPreviousValue {
     }
 }
 
-/// A TreeNode represents a generic node of a sparse merkle tree.
-///
-/// Each node consists of a [NodeLabel] and an [AzksValue]. The label determines the node's
-/// location in the tree, and the value corresponding to the node affects its parent's value.
-/// If the node is a leaf node (of type [TreeNodeType::Leaf]), then it represents an entry
-/// of the directory, where the label and value are computed based on this entry.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(bound = "")]
 pub struct TreeNode {
-    /// The binary label for this node.
     pub label: NodeLabel,
-    /// The last epoch this node was updated in.
+
     pub last_epoch: u64,
-    /// The minimum last_epoch across all descendants of this node.
+
     pub min_descendant_epoch: u64,
-    /// The label of this node's parent. where the root node is marked its own parent.
+
     pub parent: NodeLabel,
-    /// The type of node: Leaf, Root, or Interior.
+
     pub node_type: TreeNodeType,
-    /// Label of the left child, None if there is none.
+
     pub left_child: Option<NodeLabel>,
-    /// Label of the right child, None if there is none.
+
     pub right_child: Option<NodeLabel>,
-    /// Hash (aka state) of the node.
+
     #[serde(serialize_with = "azks_value_hex_serialize")]
     #[serde(deserialize_with = "azks_value_hex_deserialize")]
     pub hash: AzksValue, // FIXME: we should rename this field to "value" (but it will affect fixture generation)
@@ -247,30 +203,16 @@ impl super::SizeOf for TreeNode {
 }
 
 impl TreeNode {
-    /// If a node is new (i.e., is_new=true), the node's previous version
-    /// will be set as None without the cost of looking up this information in
-    /// the database.
     pub(crate) async fn write_to_storage<S: Database>(
         &self,
         storage: &StorageManager<S>,
         is_new: bool,
     ) -> Result<(), StorageError> {
-        // MOTIVATION:
-        // We want to retrieve the previous latest_node value, so we want to investigate where (epoch - 1).
-        // When a request comes in to write the node with a future epoch, (epoch - 1) will be the latest node in storage
-        // and we'll do a shift-left. The get call should ideally utilize a cached value, so this should be safe to
-        // call repeatedly. If the node retrieved from storage has the same epoch as the incoming changes, we don't shift
-        // since the assumption is either (1) there's no changes or (2) a shift already occurred previously where the
-        // epoch changed.
-
-        // retrieve the highest node properties, at a previous epoch than this one. If we're modifying "this" epoch, simply take it as no need for a rotation.
-        // When we write the node, with an updated epoch value, we'll rotate the stored value and capture the previous
         let target_epoch = match self.last_epoch {
             e if e > 0 => e - 1,
             other => other,
         };
 
-        // previous value of a new node is None
         let previous = if is_new {
             None
         } else {
@@ -287,14 +229,12 @@ impl TreeNode {
             }
         };
 
-        // construct the "new" record, shifting the most recent stored value into the "previous" field
         let left_shifted = TreeNodeWithPreviousValue {
             label: self.label,
             latest_node: self.clone(),
             previous_node: previous,
         };
 
-        // write this updated tuple record back to storage
         left_shifted.write_to_storage(storage).await
     }
 
@@ -325,14 +265,12 @@ impl TreeNode {
     }
 }
 
-/// Wraps the label with which to find a node in storage.
 #[derive(Clone, PartialEq, Eq, Hash, std::fmt::Debug, Deserialize, Serialize)]
 pub struct NodeKey(pub NodeLabel);
 
 unsafe impl Sync for TreeNode {}
 
 impl TreeNode {
-    /// Creates a new TreeNode and writes it to the storage.
     fn new(
         label: NodeLabel,
         parent: NodeLabel,
@@ -353,20 +291,14 @@ impl TreeNode {
         }
     }
 
-    /// Recomputes the node's hash based on its children
     pub(crate) async fn update_hash<TC: Configuration, S: Database>(
         &mut self,
         storage: &StorageManager<S>,
         hash_mode: NodeHashingMode,
     ) -> Result<(), AkdError> {
         match self.node_type {
-            // For leaf nodes, updates the hash of the node by using the `hash` field (hash of the public key) and the hashed label.
-            TreeNodeType::Leaf => {
-                // The leaf is initialized with its value.
-                // When it's used later, it'll be hashed with the epoch.
-            },
-            // For non-leaf nodes, the hash is updated by merging the hashes of the node's children.
-            // It is assumed that the children already updated their hashes.
+            TreeNodeType::Leaf => {},
+
             _ => {
                 let left_child =
                     self.get_child_node(storage, Direction::Left, self.last_epoch).await?;
@@ -384,9 +316,7 @@ impl TreeNode {
         Ok(())
     }
 
-    /// Inserts a child into this node and updates various metrics based on the child node
     pub(crate) fn set_child(&mut self, child_node: &mut TreeNode) -> Result<(), TreeNodeError> {
-        // Set child according to given direction.
         match self.label.get_prefix_ordering(child_node.label) {
             PrefixOrdering::Invalid => {
                 return Err(TreeNodeError::NoDirection(child_node.label, None));
@@ -399,13 +329,10 @@ impl TreeNode {
             },
         }
 
-        // Update parent of the child.
         child_node.parent = self.label;
 
-        // Update last updated epoch.
         self.last_epoch = max(self.last_epoch, child_node.last_epoch);
 
-        // Update the smallest descencent epoch
         if self.min_descendant_epoch == 0u64 {
             self.min_descendant_epoch = child_node.min_descendant_epoch;
         } else {
@@ -416,9 +343,6 @@ impl TreeNode {
         Ok(())
     }
 
-    ///// getrs for child nodes ////
-
-    /// Loads (from storage) the left or right child of a node using given direction and epoch
     pub(crate) async fn get_child_node<S: Database>(
         &self,
         storage: &StorageManager<S>,
@@ -454,13 +378,10 @@ impl TreeNode {
     }
 }
 
-/////// Helpers //////
-
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum NodeHashingMode {
-    // Mixes the last epoch into the hashes of any child leaves
     WithLeafEpoch,
-    // Does not mix the last epoch into the hashes of child leaves
+
     NoLeafEpoch,
 }
 
@@ -489,9 +410,7 @@ pub(crate) fn node_to_azks_value<TC: Configuration>(
     }
 }
 
-/// Create an empty root node.
 pub(crate) fn new_root_node<TC: Configuration>() -> TreeNode {
-    // Empty root hash is the same as empty node hash with no label
     let empty_root_hash = TC::empty_root_value();
     TreeNode::new(
         NodeLabel::root(),
@@ -503,7 +422,6 @@ pub(crate) fn new_root_node<TC: Configuration>() -> TreeNode {
     )
 }
 
-/// Create an interior node with an empty hash.
 pub(crate) fn new_interior_node<TC: Configuration>(label: NodeLabel, birth_epoch: u64) -> TreeNode {
     TreeNode::new(
         label,
@@ -515,7 +433,6 @@ pub(crate) fn new_interior_node<TC: Configuration>(label: NodeLabel, birth_epoch
     )
 }
 
-/// Create a specific leaf node.
 pub(crate) fn new_leaf_node<TC: Configuration>(
     label: NodeLabel,
     value: &AzksValue,
@@ -625,7 +542,6 @@ mod tests {
         Ok(())
     }
 
-    // insert_single_leaf tests
     test_config!(test_insert_single_leaf_root);
     async fn test_insert_single_leaf_root<TC: Configuration>() -> Result<(), AkdError> {
         let database = InMemoryDb::new();
@@ -636,15 +552,12 @@ mod tests {
         let val_0 = AzksValue([0u8; DIGEST_BYTES]);
         let val_1 = AzksValue([1u8; DIGEST_BYTES]);
 
-        // Prepare the leaf to be inserted with label 0.
         let mut leaf_0 =
             new_leaf_node::<TC>(NodeLabel::new(byte_arr_from_u64(0b0u64), 1u32), &val_0, 0);
 
-        // Prepare another leaf to insert with label 1.
         let mut leaf_1 =
             new_leaf_node::<TC>(NodeLabel::new(byte_arr_from_u64(0b1u64 << 63), 1u32), &val_1, 0);
 
-        // Insert leaves.
         root.set_child(&mut leaf_0)?;
         root.set_child(&mut leaf_1)?;
         leaf_0.write_to_storage(&db, false).await?;
@@ -653,7 +566,6 @@ mod tests {
         root.update_hash::<TC, _>(&db, NodeHashingMode::WithLeafEpoch).await?;
         root.write_to_storage(&db, false).await?;
 
-        // Merge leaves hash along with the root label.
         let leaves_hash = TC::compute_parent_hash_from_children(
             &AzksValue(TC::hash_leaf_with_commitment(val_0, 0).0),
             &leaf_0.label.value::<TC>(),
@@ -663,7 +575,6 @@ mod tests {
 
         let expected = TC::compute_root_hash_from_val(&leaves_hash);
 
-        // Get root hash
         let stored_root = db.get::<TreeNodeWithPreviousValue>(&NodeKey(NodeLabel::root())).await?;
         let root_digest = match stored_root {
             DbRecord::TreeNode(node) => TC::compute_root_hash_from_val(&node.latest_node.hash),
@@ -775,7 +686,6 @@ mod tests {
         let mut leaf_3 =
             new_leaf_node::<TC>(NodeLabel::new(byte_arr_from_u64(0b010u64 << 61), 3u32), &val_3, 4);
 
-        // Insert nodes.
         left_child.set_child(&mut leaf_0)?;
         left_child.set_child(&mut leaf_3)?;
         leaf_0.write_to_storage(&db, false).await?;
@@ -807,7 +717,6 @@ mod tests {
 
         let leaf_3_hash = (TC::hash_leaf_with_commitment(val_3, 4), leaf_3.label.value::<TC>());
 
-        // Children: left: leaf2, right: leaf1, label: 1
         let right_child_expected_hash = (
             TC::compute_parent_hash_from_children(
                 &AzksValue(leaf_2_hash.0.0),
@@ -818,7 +727,6 @@ mod tests {
             NodeLabel::new(byte_arr_from_u64(0b1u64 << 63), 1u32).value::<TC>(),
         );
 
-        // Children: left: new_leaf, right: leaf3, label: 0
         let left_child_expected_hash = (
             TC::compute_parent_hash_from_children(
                 &AzksValue(leaf_0_hash.0.0),

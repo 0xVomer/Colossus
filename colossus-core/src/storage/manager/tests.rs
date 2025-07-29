@@ -1,6 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! Tests of the storage manager
-
 use super::*;
 use crate::{
     akd::{
@@ -49,11 +46,10 @@ async fn test_storage_manager_transaction() {
         .batch_set(records)
         .await
         .expect("Failed to set batch of records");
-    // there should be no items in the db, as they should all be in the transaction log
+
     assert_eq!(Ok(0), storage_manager.db.batch_get_all_direct().await.map(|items| items.len()));
     assert_eq!(11, storage_manager.transaction.count());
 
-    // test a retrieval doesn't go to the database. Since we know the db is empty, it should be retrieved from the transaction log
     let key = NodeKey(NodeLabel { label_len: 2, label_val: [2u8; 32] });
     storage_manager
         .get::<TreeNodeWithPreviousValue>(&key)
@@ -71,7 +67,7 @@ async fn test_storage_manager_transaction() {
         .commit_transaction()
         .await
         .expect("Failed to commit transaction");
-    // now the records should be in the database and the transaction log empty
+
     assert_eq!(Ok(11), storage_manager.db.batch_get_all_direct().await.map(|items| items.len()));
     assert_eq!(0, storage_manager.transaction.count());
 }
@@ -110,16 +106,13 @@ async fn test_storage_manager_cache_populated_by_batch_set() {
 
     records.push(DbRecord::Azks(Azks { latest_epoch: 0, num_nodes: 0 }));
 
-    // write straight to the db, populating the cache
     storage_manager
         .batch_set(records)
         .await
         .expect("Failed to set batch of records");
 
-    // flush the database
     storage_manager.db.clear();
 
-    // test a retrieval still gets data (from the cache)
     let key = NodeKey(NodeLabel { label_len: 2, label_val: [2u8; 32] });
     storage_manager
         .get::<TreeNodeWithPreviousValue>(&key)
@@ -177,17 +170,15 @@ async fn test_storage_manager_cache_populated_by_batch_get() {
 
     records.push(DbRecord::Azks(Azks { latest_epoch: 0, num_nodes: 0 }));
 
-    // write straight to the db
     storage_manager
         .batch_set(records)
         .await
         .expect("Failed to set batch of records");
 
     let db_arc = storage_manager.get_db();
-    // flush the cache by destroying the storage manager
+
     drop(storage_manager);
 
-    // re-create the storage manager, and run a batch_get of the same data keys to populate the cache
     let storage_manager = StorageManager::new(
         Arc::try_unwrap(db_arc).expect("Failed to grab arc"),
         Some(std::time::Duration::from_secs(1000)),
@@ -200,10 +191,8 @@ async fn test_storage_manager_cache_populated_by_batch_get() {
         .await
         .expect("Failed to get a batch of records");
 
-    // flush the database
     storage_manager.db.clear();
 
-    // test a retrieval still gets data (from the cache)
     let key = NodeKey(NodeLabel { label_len: 2, label_val: [2u8; 32] });
     storage_manager
         .get::<TreeNodeWithPreviousValue>(&key)
@@ -219,6 +208,5 @@ async fn test_storage_manager_cache_populated_by_batch_get() {
 
     storage_manager.flush_cache().await;
 
-    // This should be an empty result
     assert_eq!(Ok(vec![]), storage_manager.batch_get::<TreeNodeWithPreviousValue>(&keys).await);
 }

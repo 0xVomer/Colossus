@@ -1,0 +1,148 @@
+use super::{error::Error, zkp::Nonce};
+use bls12_381_plus::{G1Affine, G1Projective, G2Affine, G2Projective, Scalar};
+
+pub(crate) fn try_into_scalar(value: Vec<u8>) -> Result<Scalar, Error> {
+    let mut bytes = [0u8; Scalar::BYTES];
+    bytes.copy_from_slice(&value);
+    let converted = {
+        let maybe_coverted = Scalar::from_be_bytes(&bytes);
+
+        if maybe_coverted.is_some().into() {
+            maybe_coverted.unwrap()
+        } else {
+            return Err(Error::ScalarConversionError);
+        }
+    };
+    Ok(converted)
+}
+
+pub fn try_decompress_g1(value: Vec<u8>) -> Result<G1Affine, Error> {
+    let mut bytes = [0u8; G1Affine::COMPRESSED_BYTES];
+    bytes.copy_from_slice(&value);
+    let maybe_g1 = G1Affine::from_compressed(&bytes);
+
+    if maybe_g1.is_none().into() {
+        return Err(Error::InvalidG1Point);
+    } else {
+        Ok(maybe_g1.unwrap())
+    }
+}
+
+pub fn try_decompress_g2(value: Vec<u8>) -> Result<G2Affine, Error> {
+    let mut bytes = [0u8; G2Affine::COMPRESSED_BYTES];
+    bytes.copy_from_slice(&value);
+    let maybe_g2 = G2Affine::from_compressed(&bytes);
+
+    if maybe_g2.is_none().into() {
+        return Err(Error::InvalidG2Point);
+    } else {
+        Ok(maybe_g2.unwrap())
+    }
+}
+
+pub fn try_into_g1(value: Vec<Vec<u8>>) -> Result<Vec<G1Projective>, Error> {
+    Ok(value
+        .iter()
+        .map(|item| {
+            let mut bytes = [0u8; G1Affine::COMPRESSED_BYTES];
+            bytes.copy_from_slice(item);
+            let g1_maybe = G1Affine::from_compressed(&bytes);
+
+            if g1_maybe.is_none().into() {
+                return Err(Error::InvalidG1Point);
+            }
+            Ok(g1_maybe.expect("it'll be fine, it passed the check"))
+        })
+        .map(|item| Ok(G1Projective::from(item?)))
+        .collect::<Result<Vec<G1Projective>, Error>>()?)
+}
+
+pub fn try_into_g2(value: Vec<Vec<u8>>) -> Result<Vec<G2Projective>, Error> {
+    Ok(value
+        .iter()
+        .map(|item| {
+            let mut bytes = [0u8; G2Affine::COMPRESSED_BYTES];
+            bytes.copy_from_slice(item);
+            let g2_maybe = G2Affine::from_compressed(&bytes);
+
+            if g2_maybe.is_none().into() {
+                return Err(Error::InvalidG2Point);
+            }
+            Ok(g2_maybe.expect("it'll be fine, it passed the check"))
+        })
+        .map(|item| Ok(G2Projective::from(item?)))
+        .collect::<Result<Vec<G2Projective>, Error>>()?)
+}
+
+pub fn maybe_nonce(nonce: Option<&[u8]>) -> Result<Option<Nonce>, String> {
+    match nonce {
+        Some(n) => nonce_by_len(n).map(Some),
+        None => Ok(None),
+    }
+}
+
+pub fn nonce_by_len(nonce: &[u8]) -> Result<Nonce, String> {
+    if nonce.len() == 32 {
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(nonce);
+
+        if let Ok(nonce) = Nonce::try_from(bytes) {
+            Ok(nonce)
+        } else {
+            Ok(Nonce::new(bytes))
+        }
+    } else {
+        Ok(Nonce::new(nonce))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use bls12_381_plus::elliptic_curve::Field;
+    use bls12_381_plus::group::{Curve, Group};
+    use cosmian_crypto_core::{CsRng, reexport::rand_core::SeedableRng};
+
+    #[test]
+    fn test_try_into_scalar() {
+        let rng = CsRng::from_entropy();
+
+        let scalar = Scalar::random(rng);
+        let bytes = scalar.to_be_bytes();
+        let result = try_into_scalar(bytes.to_vec());
+        assert_eq!(result.is_ok(), true);
+    }
+
+    #[test]
+    fn test_try_decompress_g1() {
+        let mut rng = CsRng::from_entropy();
+
+        let g1 = G1Projective::random(&mut rng);
+        let g1_affine = g1.to_affine();
+        let bytes = g1_affine.to_compressed();
+        let result_affine = try_decompress_g1(bytes.to_vec()).unwrap();
+
+        eprintln!(
+            "Proj: {:?}\n\n Affine:{:?},\n\n Comp: {:?}\n\n DeAffine: {:?}",
+            g1,
+            g1_affine.clone(),
+            bytes,
+            result_affine
+        );
+
+        assert_eq!(g1_affine, result_affine);
+    }
+
+    #[test]
+    fn test_try_decompress_g2() {
+        let mut rng = CsRng::from_entropy();
+
+        let g2 = G2Projective::random(&mut rng);
+        let bytes = g2.to_affine().to_compressed();
+        let result = try_decompress_g2(bytes.to_vec());
+        assert_eq!(result.is_ok(), true);
+
+        assert_eq!(result.unwrap(), g2.to_affine());
+    }
+}

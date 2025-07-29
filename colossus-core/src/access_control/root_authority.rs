@@ -1,3 +1,4 @@
+use crate::dac::{entry::MaxEntries, keypair::MaxCardinality};
 use crate::{
     access_control::cryptography::{
         ElGamal, Encapsulations, G_hash, H_hash, J_hash, KmacSignature, MIN_TRACING_LEVEL, MlKem,
@@ -7,17 +8,30 @@ use crate::{
     },
     policy::{AccessStructure, AttributeStatus, Error, RevisionMap, RevisionVec, Right},
 };
+
+use blastkids::kdf;
+use bls12_381_plus::G1Affine;
+pub use bls12_381_plus::G1Projective;
+use bls12_381_plus::G2Affine;
+pub use bls12_381_plus::G2Projective;
+pub use bls12_381_plus::Scalar;
+use bls12_381_plus::elliptic_curve::hash2curve::ExpandMsgXmd;
+use bls12_381_plus::elliptic_curve::ops::MulByGenerator;
+pub use bls12_381_plus::group::Curve;
+pub use bls12_381_plus::group::Group;
+pub use secrecy::zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+
 use cosmian_crypto_core::{
     FixedSizeCBytes, RandomFixedSizeCBytes, Secret, SymmetricKey,
     bytes_ser_de::{Deserializer, Serializable, Serializer, to_leb128_len},
     reexport::rand_core::CryptoRngCore,
 };
+pub use secrecy::{ExposeSecret, SecretBox};
 use std::{
     collections::{HashMap, HashSet, LinkedList},
     mem::take,
 };
 use tiny_keccak::{Hasher, Kmac, Sha3};
-use zeroize::Zeroize;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct UserId(pub LinkedList<<ElGamal as Nike>::SecretKey>);
@@ -148,15 +162,18 @@ impl Serializable for TracingPublicKey {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct RootAuthority {
     pub access_structure: AccessStructure,
+
+    master_sk: SecretBox<Scalar>,
+    signing_key: Option<SymmetricKey<SIGNING_KEY_LENGTH>>,
+
+    sk_access_rights: RevisionMap<Right, (bool, AccessRightSecretKey)>,
     users: HashSet<UserId>,
 
     sk: <ElGamal as Nike>::SecretKey,
-    signing_key: Option<SymmetricKey<SIGNING_KEY_LENGTH>>,
     tracers: LinkedList<(<ElGamal as Nike>::SecretKey, <ElGamal as Nike>::PublicKey)>,
-    sk_access_rights: RevisionMap<Right, (bool, AccessRightSecretKey)>,
 }
 
 impl RootAuthority {
@@ -170,6 +187,9 @@ impl RootAuthority {
             )));
         }
 
+        let master_sk: Scalar =
+            kdf::derive_master_sk(seed.as_ref()).expect("Seed has length of 32 bytes");
+
         Ok(RootAuthority {
             access_structure: AccessStructure::default(),
             users: HashSet::new(),
@@ -177,7 +197,26 @@ impl RootAuthority {
             sk_access_rights: RevisionMap::new(),
             signing_key: Some(SymmetricKey::<SIGNING_KEY_LENGTH>::new(rng)),
             tracers: (0..=tracing_level).map(|_| ElGamal::keygen(rng)).collect::<Result<_, _>>()?,
+            master_sk: SecretBox::new(Box::new(master_sk)),
         })
+    }
+
+    pub fn new_credential_issuer(
+        &self,
+        index: u32,
+        t: MaxCardinality,
+        l_message: MaxEntries,
+    ) -> Account {
+        let sk: SecretBox<Scalar> =
+            SecretBox::new(Box::new(kdf::ckd_sk_hardened(self.master_sk.expose_secret(), index)));
+
+        let sk_hardened_0 =
+            Zeroizing::new(kdf::ckd_sk_normal::<G2Projective>(sk.expose_secret(), 0));
+
+        let pk_g1 = G1Projective::mul_by_generator(&sk_hardened_0);
+        let pk_g2 = G2Projective::mul_by_generator(sk.expose_secret());
+
+        Account { index, sk, pk_g1, pk_g2 }
     }
 
     pub fn count(&self) -> usize {
@@ -302,7 +341,6 @@ impl RootAuthority {
             let S_ij = xor_in_place(H_hash(K1, K2.as_ref(), &T)?, F);
             let (tag_ij, ss) = J_hash(&S_ij, &U);
             if cap.tag == tag_ij {
-                // Fujisaki-Okamoto
                 let r = G_hash(&S_ij)?;
                 let c_ij = self.set_traps(&r);
                 if cap.c == c_ij {
@@ -401,7 +439,6 @@ impl RootAuthority {
 
     fn generate_user_id(&mut self, rng: &mut impl CryptoRngCore) -> Result<UserId, Error> {
         if let Some((last_tracer, _)) = self.tracers.back() {
-            // Generate all but the last marker at random.
             let mut markers = self
                 .tracers
                 .iter()
@@ -576,7 +613,7 @@ impl RootPublicKey {
         &self,
         r: &<ElGamal as Nike>::SecretKey,
     ) -> Vec<<ElGamal as Nike>::PublicKey> {
-        self.tpk.0.iter().map(|Pi| Pi * r).collect()
+        self.tpk.0.iter().map(|pi| pi * r).collect()
     }
 
     pub fn select_access_right_keys(
@@ -783,7 +820,6 @@ impl UserSecretKey {
                     let S_ij = xor_in_place(H_hash(&K1, Some(&K2), &T)?, F);
                     let (tag_ij, ss) = J_hash(&S_ij, &U);
                     if &cap.tag == &tag_ij {
-                        // Fujisaki-Okamoto
                         let r = G_hash(&S_ij)?;
                         let c_ij = self.set_traps(&r);
                         if cap.c == c_ij {
@@ -882,7 +918,6 @@ pub fn usk_keygen(
     auth: &mut RootAuthority,
     coordinates: HashSet<Right>,
 ) -> Result<UserSecretKey, Error> {
-    // Extract keys first to avoid unnecessary computation in case those cannot be found.
     let coordinate_keys = auth
         .get_latest_access_right_sk(coordinates.into_iter())
         .collect::<Result<RevisionVec<_, _>, Error>>()?;
@@ -1010,7 +1045,6 @@ pub fn refresh_usk(
 }
 
 impl UserId {
-    /// Returns the tracing level of the USK.
     pub(crate) fn tracing_level(&self) -> usize {
         self.0.len() - 1
     }
@@ -1024,7 +1058,7 @@ impl UserId {
 mod tests {
     use super::*;
     use crate::{
-        access_control::{Root, cryptography::traits::KemAc, test_utils::gen_auth},
+        access_control::{AccessControl, cryptography::traits::KemAc, test_utils::gen_auth},
         policy::AccessPolicy,
     };
     use cosmian_crypto_core::{
@@ -1066,10 +1100,10 @@ mod tests {
         }
 
         {
-            let api = Root::default();
+            let api = AccessControl::default();
             let (mut msk, mpk) = gen_auth(&api, false).unwrap();
             let usk = api
-                .generate_user_secret_key(&mut msk, &AccessPolicy::parse("SEC::TOP").unwrap())
+                .grant_access_right_keys(&mut msk, &AccessPolicy::parse("SEC::TOP").unwrap())
                 .unwrap();
             let (_, enc) = api.encaps(&mpk, &AccessPolicy::parse("DPT::MKG").unwrap()).unwrap();
 
@@ -1086,7 +1120,7 @@ mod test {
     use super::*;
     use crate::{
         access_control::{
-            Root,
+            AccessControl,
             cryptography::{
                 MIN_TRACING_LEVEL,
                 traits::{KemAc, PkeAc},
@@ -1199,7 +1233,6 @@ mod test {
         let (old_key_1, old_enc_1) = rpk.encapsulate(&mut rng, &subspace_1).unwrap();
         let (old_key_2, old_enc_2) = rpk.encapsulate(&mut rng, &subspace_2).unwrap();
 
-        // Old USK can open encapsulations associated with their coordinate.
         assert_eq!(Some(&old_key_1), usk_1.decapsulate(&mut rng, &old_enc_1).unwrap().as_ref());
         assert_eq!(None, usk_1.decapsulate(&mut rng, &old_enc_2).unwrap());
         assert_eq!(Some(old_key_2), usk_2.decapsulate(&mut rng, &old_enc_2).unwrap());
@@ -1268,13 +1301,13 @@ mod test {
     #[test]
     fn test_reencrypt_with_auth() {
         let ap = AccessPolicy::parse("DPT::FIN && SEC::TOP").unwrap();
-        let cc = Root::default();
+        let cc = AccessControl::default();
 
         let mut rng = CsRng::from_entropy();
 
         let (mut auth, _) = gen_auth(&cc, false).unwrap();
         let rpk = cc.update_auth(&mut auth).expect("cannot update master keys");
-        let mut usk = cc.generate_user_secret_key(&mut auth, &ap).expect("cannot generate usk");
+        let mut usk = cc.grant_access_right_keys(&mut auth, &ap).expect("cannot generate usk");
 
         let (old_key, old_enc) = cc.encaps(&rpk, &ap).unwrap();
         assert_eq!(Some(&old_key), usk.decapsulate(&mut rng, &old_enc).unwrap().as_ref());
@@ -1290,10 +1323,10 @@ mod test {
     #[test]
     fn test_root_kem() {
         let ap = AccessPolicy::parse("DPT::FIN && SEC::TOP").unwrap();
-        let api = Root::default();
+        let api = AccessControl::default();
         let (mut auth, _rpk) = gen_auth(&api, false).unwrap();
         let rpk = api.update_auth(&mut auth).expect("cannot update master keys");
-        let usk = api.generate_user_secret_key(&mut auth, &ap).expect("cannot generate usk");
+        let usk = api.grant_access_right_keys(&mut auth, &ap).expect("cannot generate usk");
         let (secret, enc) = api.encaps(&rpk, &ap).unwrap();
         let res = api.decaps(&usk, &enc).unwrap();
         assert_eq!(secret, res.unwrap());
@@ -1302,7 +1335,7 @@ mod test {
     #[test]
     fn test_root_pke() {
         let ap = AccessPolicy::parse("DPT::FIN && SEC::TOP").unwrap();
-        let api = Root::default();
+        let api = AccessControl::default();
         let (mut auth, rpk) = gen_auth(&api, false).unwrap();
 
         let ptx = "testing encryption/decryption".as_bytes();
@@ -1312,7 +1345,7 @@ mod test {
             &api, &rpk, &ap, ptx, aad,
         )
         .expect("cannot encrypt!");
-        let usk = api.generate_user_secret_key(&mut auth, &ap).expect("cannot generate usk");
+        let usk = api.grant_access_right_keys(&mut auth, &ap).expect("cannot generate usk");
         let ptx1 = PkeAc::<{ XChaCha20Poly1305::KEY_LENGTH }, XChaCha20Poly1305>::decrypt(
             &api, &usk, &ctx, aad,
         )

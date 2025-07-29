@@ -5,7 +5,6 @@ use std::{
     ops::{BitAnd, BitOr},
 };
 
-/// An access policy is a boolean expression of qualified attributes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccessPolicy {
     Broadcast,
@@ -43,8 +42,6 @@ impl BitOr for AccessPolicy {
 }
 
 impl super::AccessPolicy {
-    /// Find the corresponding closing parenthesis in the boolean expression
-    /// given as a string.
     fn find_matching_closing_parenthesis(boolean_expression: &str) -> Result<usize, Error> {
         let mut count = 0;
         for (index, c) in boolean_expression.chars().enumerate() {
@@ -62,53 +59,6 @@ impl super::AccessPolicy {
         )))
     }
 
-    /// Parses the given string into an access policy.
-    ///
-    /// # Abstract grammar
-    ///
-    /// The following abstract grammar describes the valid access policies
-    /// syntax. The brackets are used to denote optional elements, the pipes
-    /// ('|') to denote options, slashes to denote REGEXP, and spaces to denote
-    /// concatenation. Spaces may be interleaved with elements. They are simply
-    /// ignored by the parser.
-    ///
-    /// - access_policy: [ attribute | group [ operator access_policy ]]
-    /// - attribute: dimension [ separator component ]
-    /// - group: ( access_policy )
-    /// - operator: OR | AND
-    /// - OR: ||
-    /// - AND: &&
-    /// - separator: ::
-    /// - dimension: /[^&|: ]+/
-    /// - component: /[^&|: ]+/
-    ///
-    /// The REGEXP used to describe the dimension and the component stands for:
-    /// "at least one character that is neither '&', '|', ':' nor ' '".
-    ///
-    /// # Precedence rule
-    ///
-    /// Note that the usual precedence rules hold in expressing an access
-    /// policy:
-    /// 1. grouping takes precedence over all operators;
-    /// 2. the logical AND takes precedence over the logical OR.
-    ///
-    /// # Examples
-    ///
-    /// The following expressions define valid access policies:
-    ///
-    /// - "DPT::MKG && (CTR::FR || CTR::DE)"
-    /// - ""
-    /// - "SEC::Low Secret && CTR::FR"
-    ///
-    /// Notice that the arity of the operators is two. Therefore the following
-    /// access policy is *invalid*:
-    ///
-    /// - "DPT::MKG (&& CTR::FR || CTR::DE)"
-    ///
-    /// It is not possible to concatenate attributes. Therefore the following
-    /// access policy is *invalid*:
-    ///
-    /// - "DPT::MKG DPT::FIN"
     pub fn parse(mut e: &str) -> Result<Self, Error> {
         let seeker = |c: &char| !"()|&".contains(*c);
         let mut q = LinkedList::<Self>::new();
@@ -176,7 +126,6 @@ impl super::AccessPolicy {
         }
     }
 
-    /// Conjugate the access policies from the given iterator.
     fn conjugate(first: Self, policies: impl Iterator<Item = Self>) -> Self {
         policies.fold(first, |mut res, operand| {
             res = res & operand;
@@ -184,9 +133,6 @@ impl super::AccessPolicy {
         })
     }
 
-    /// Converts the access policy into the Disjunctive Normal Form (DNF) of its
-    /// attributes. Returns the DNF as the list of its conjunctions, themselves
-    /// represented as the list of their attributes.
     #[must_use]
     pub fn to_dnf(&self) -> Vec<Vec<QualifiedAttribute>> {
         match self {
@@ -215,7 +161,6 @@ mod tests {
 
     #[test]
     fn test_access_policy_parsing() {
-        // These are valid access policies.
         let ap = AccessPolicy::parse("(D1::A && (D2::A) || D2::B)").unwrap();
         println!("{ap:#?}");
         let ap = AccessPolicy::parse("D1::A && D2::A || D2::B").unwrap();
@@ -227,8 +172,6 @@ mod tests {
         assert_eq!(AccessPolicy::parse("*").unwrap(), AccessPolicy::Broadcast);
         assert!(AccessPolicy::parse("").is_err());
 
-        // These are invalid access policies.
-        // TODO: make this one valid (change the parsing rule of the attribute).
         assert!(AccessPolicy::parse("D1").is_err());
         assert!(AccessPolicy::parse("D1::A (&& D2::A || D2::B)").is_err());
         assert!(AccessPolicy::parse("|| D2::B").is_err());

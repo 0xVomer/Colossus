@@ -1,17 +1,15 @@
 use super::VrfError;
 
-/// Proof verification error types
 #[derive(Debug, Eq, PartialEq)]
 pub enum VerificationError {
-    /// Error verifying a membership proof
     MembershipProof(String),
-    /// Error verifying a non-membership proof
+
     NonMembershipProof(String),
-    /// Error verifying a lookup proof
+
     LookupProof(String),
-    /// Error verifying a history proof
+
     HistoryProof(String),
-    /// Error verifying a VRF proof
+
     Vrf(VrfError),
 }
 

@@ -1,6 +1,3 @@
-//! This module implements a higher-parallelism, async temporary cache for database
-//! objects
-
 use super::{CachedItem, DEFAULT_CACHE_CLEAN_FREQUENCY_MS, DEFAULT_ITEM_LIFETIME_MS};
 use crate::{
     akd::SizeOf,
@@ -15,8 +12,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-/// Implements a basic cache with timing information which automatically flushes
-/// expired entries and removes them
 #[derive(Clone)]
 pub struct TimedCache {
     azks: Arc<RwLock<Option<DbRecord>>>,
@@ -31,7 +26,6 @@ pub struct TimedCache {
 }
 
 impl TimedCache {
-    /// Log cache access metrics along with size information
     pub fn log_metrics(&self) {
         let hit_count = self.hit_count.swap(0, Ordering::Relaxed);
         let cache_size = self.map.len();
@@ -44,14 +38,10 @@ impl TimedCache {
 impl TimedCache {
     async fn clean(&self) {
         if !self.can_clean.load(Ordering::Relaxed) {
-            // cleaning is disabled
             return;
         }
 
-        let do_clean = {
-            // we need the {} brackets in order to release the read lock, since we _may_ acquire a write lock shortly later
-            *(self.last_clean.read().await) + self.clean_frequency < Instant::now()
-        };
+        let do_clean = { *(self.last_clean.read().await) + self.clean_frequency < Instant::now() };
         if do_clean {
             let mut last_clean_write = self.last_clean.write().await;
 
@@ -78,19 +68,19 @@ impl TimedCache {
                     info!(
                         "Retained cache size has exceeded the predefined limit, cleaning old entries"
                     );
-                    // calculate the percentage we'd need to trim off to get to 100% utilization and take another 5%
+
                     let percent_clean =
                         0.05 + 1.0 - (memory_limit_bytes as f64) / (retained_size as f64);
-                    // convert that to the number of items to delete based on the size of the dictionary
+
                     let num_clean = ((num_retained as f64) * percent_clean).ceil() as usize;
-                    // sort the dict based on the oldest entries
+
                     let mut keys_and_expiration = self
                         .map
                         .iter()
                         .map(|kv| (kv.key().clone(), kv.value().expiration))
                         .collect::<Vec<_>>();
                     keys_and_expiration.sort_by(|(_, a), (_, b)| a.cmp(b));
-                    // take `num_clean` old entries and remove them
+
                     for key in keys_and_expiration.into_iter().take(num_clean).map(|(k, _)| k) {
                         self.map.remove(&key);
                     }
@@ -98,18 +88,13 @@ impl TimedCache {
                     debug!("END cache memory pressure clean")
                 }
             } else {
-                // memory pressure analysis is disabled, simply utilize timed cache cleaning
                 self.map.retain(|_, v| v.expiration >= now);
             }
 
-            // update last clean time
             *last_clean_write = Instant::now();
         }
     }
 
-    /// Create a new timed cache instance. You can supply an optional item lifetime parameter
-    /// or take the default (30s) and an optional memory-pressure limit, where the cache will be
-    /// cleaned if too much memory is being utilized.
     pub fn new(
         o_lifetime: Option<Duration>,
         o_memory_limit_bytes: Option<usize>,
@@ -136,21 +121,16 @@ impl TimedCache {
         }
     }
 
-    /// Perform a hit-test of the cache for a given key. If successful, Some(record) will be returned.
     pub async fn hit_test<St: Storable>(&self, key: &St::StorageKey) -> Option<DbRecord> {
         self.clean().await;
 
         let full_key = St::get_full_binary_key_id(key);
 
-        // special case for AZKS
         if full_key == crate::akd::Azks::get_full_binary_key_id(&crate::akd::DEFAULT_AZKS_KEY) {
-            // someone's requesting the AZKS object, return it from the special "cache" storage
             let record = self.azks.read().await.clone();
 
             self.hit_count.fetch_add(1, Ordering::Relaxed);
 
-            // AZKS objects cannot expire, they need to be manually flushed, so we don't need
-            // to check the expiration as below
             return record;
         }
 
@@ -158,9 +138,7 @@ impl TimedCache {
             self.hit_count.fetch_add(1, Ordering::Relaxed);
 
             let ignore_clean = !self.can_clean.load(Ordering::Relaxed);
-            // if we've disabled cache cleaning, we're in the middle
-            // of an in-memory transaction and should ignore expiration
-            // of cache items until this flag is disabled again
+
             if ignore_clean || result.expiration > Instant::now() {
                 return Some(result.data.clone());
             }
@@ -169,13 +147,11 @@ impl TimedCache {
         None
     }
 
-    /// Put an item into the cache.
     pub async fn put(&self, record: &DbRecord) {
         self.clean().await;
 
         let key = record.get_full_binary_id();
 
-        // special case for AZKS
         if let DbRecord::Azks(azks_ref) = &record {
             let mut guard = self.azks.write().await;
             *guard = Some(DbRecord::Azks(azks_ref.clone()));
@@ -188,7 +164,6 @@ impl TimedCache {
         }
     }
 
-    /// Put a batch of items into the cache, utilizing a single write lock.
     pub async fn batch_put(&self, records: &[DbRecord]) {
         self.clean().await;
 
@@ -207,13 +182,11 @@ impl TimedCache {
         }
     }
 
-    /// Flush the cache.
     pub async fn flush(&self) {
         self.map.clear();
         *(self.azks.write().await) = None;
     }
 
-    /// Retrieve all the cached items.
     pub async fn get_all(&self) -> Vec<DbRecord> {
         self.clean().await;
 
@@ -228,13 +201,11 @@ impl TimedCache {
         items
     }
 
-    /// Disable cache-cleaning (e.g. during a transaction).
     pub fn disable_clean(&self) {
         debug!("Disabling cache cleaning");
         self.can_clean.store(false, Ordering::Relaxed);
     }
 
-    /// Re-enable cache cleaning (e.g. when a transaction is over).
     pub fn enable_clean(&self) {
         debug!("Enabling cache cleaning");
         self.can_clean.store(true, Ordering::Relaxed);

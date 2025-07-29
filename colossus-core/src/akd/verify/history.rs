@@ -1,6 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! Verification of key history proofs
-
 use super::{
     AkdLabel, Configuration, Digest, HistoryProof, UpdateProof, VerificationError, VerifyResult,
     VersionFreshness,
@@ -11,38 +8,24 @@ use super::{
 };
 use alloc::{format, string::ToString, vec::Vec};
 
-/// The parameters that dictate how much of the history proof for the server to
-/// return to the consumer (either a complete history, or some limited form).
 #[derive(Copy, Clone, Debug)]
 pub enum HistoryParams {
-    /// Returns a complete history for a label
     Complete,
-    /// Returns up to the most recent N updates for a label
+
     MostRecent(usize),
 }
 
 impl Default for HistoryParams {
-    /// By default, we return a complete history
     fn default() -> Self {
         Self::Complete
     }
 }
 
-/// Parameters for customizing how history proof verification proceeds
 #[derive(Copy, Clone)]
 pub enum HistoryVerificationParams {
-    /// No customization to the verification procedure
-    Default {
-        /// the HistoryParams that was used to generate the history proof
-        history_params: HistoryParams,
-    },
-    /// Allows for the encountering of missing (tombstoned) values
-    /// instead of attempting to check if their hash matches the leaf node
-    /// hash
-    AllowMissingValues {
-        /// the HistoryParams that was used to generate the history proof
-        history_params: HistoryParams,
-    },
+    Default { history_params: HistoryParams },
+
+    AllowMissingValues { history_params: HistoryParams },
 }
 
 impl Default for HistoryVerificationParams {
@@ -59,16 +42,13 @@ fn verify_with_history_params(
 ) -> Result<(Vec<u64>, Vec<u64>), VerificationError> {
     let num_proofs = proof.update_proofs.len();
 
-    // Make sure the update proofs are non-empty
     if num_proofs == 0 {
         return Err(VerificationError::HistoryProof(format!(
             "No update proofs included in the proof of user {akd_label:?} at epoch {current_epoch:?}!"
         )));
     }
 
-    // Check that the sent proofs are for a contiguous sequence of decreasing versions
     for count in 1..num_proofs {
-        // Make sure this proof is for a version 1 more than the previous one.
         let prev_version = proof.update_proofs[count - 1].version;
         let curr_version = proof.update_proofs[count].version;
         if curr_version + 1 != prev_version {
@@ -108,7 +88,6 @@ fn verify_with_history_params(
 
     match params {
         HistoryParams::Complete => {
-            // Make sure the start version is 1
             if start_version != 1 {
                 return Err(VerificationError::HistoryProof(format!(
                     "Expected start version to be 1 given that it is a complete history, but got start_version = {}",
@@ -141,7 +120,6 @@ fn verify_with_history_params(
     let (past_marker_versions, future_marker_versions) =
         super::get_marker_versions(start_version, end_version, current_epoch);
 
-    // Perform checks for expected number of past marker proofs
     if past_marker_versions.len() != proof.past_marker_vrf_proofs.len() {
         return Err(VerificationError::HistoryProof(format!(
             "Expected {} past marker proofs, but got {}",
@@ -157,7 +135,6 @@ fn verify_with_history_params(
         )));
     }
 
-    // Perform checks for expected number of future marker proofs
     if future_marker_versions.len() != proof.future_marker_vrf_proofs.len() {
         return Err(VerificationError::HistoryProof(format!(
             "Expected {} future marker proofs, but got {}",
@@ -176,10 +153,6 @@ fn verify_with_history_params(
     Ok((past_marker_versions, future_marker_versions))
 }
 
-/// Verifies a key history proof, given the corresponding sequence of hashes.
-/// Returns a vector of whether the validity of a hash could be verified.
-/// When false, the value <=> hash validity at the position could not be
-/// verified because the value has been removed ("tombstoned") from the storage layer.
 pub fn key_history_verify<TC: Configuration>(
     vrf_public_key: &[u8],
     root_hash: Digest,
@@ -197,11 +170,9 @@ pub fn key_history_verify<TC: Configuration>(
     let (past_marker_versions, future_marker_versions) =
         verify_with_history_params(current_epoch, &akd_label, &proof, params)?;
 
-    // Verify all individual update proofs
     let mut maybe_previous_update_epoch = None;
     for update_proof in proof.update_proofs.into_iter() {
         if let Some(previous_update_epoch) = maybe_previous_update_epoch {
-            // Make sure this this epoch is more than the previous epoch you checked
             if update_proof.epoch > previous_update_epoch {
                 return Err(VerificationError::HistoryProof(format!(
                     "Version numbers for updates are decreasing, but their corresponding
@@ -233,7 +204,6 @@ pub fn key_history_verify<TC: Configuration>(
         )?;
     }
 
-    // Verify the VRFs and non-membership proofs for future markers
     for (i, version) in future_marker_versions.iter().enumerate() {
         verify_nonexistence::<TC>(
             vrf_public_key,
@@ -255,7 +225,6 @@ pub fn key_history_verify<TC: Configuration>(
     Ok(results)
 }
 
-/// Verifies a single update proof
 fn verify_single_update_proof<TC: Configuration>(
     root_hash: Digest,
     vrf_public_key: &[u8],
@@ -263,14 +232,10 @@ fn verify_single_update_proof<TC: Configuration>(
     akd_label: &AkdLabel,
     params: HistoryVerificationParams,
 ) -> Result<VerifyResult, VerificationError> {
-    // Verify the VRF and membership proof for the corresponding label for the version being updated to.
     match (params, &proof.value) {
         (HistoryVerificationParams::AllowMissingValues { .. }, bytes)
             if bytes.0 == super::TOMBSTONE =>
         {
-            // A tombstone was encountered, we need to just take the
-            // hash of the value at "face value" since we don't have
-            // the real value available
             verify_existence::<TC>(
                 vrf_public_key,
                 root_hash,
@@ -282,7 +247,6 @@ fn verify_single_update_proof<TC: Configuration>(
             )?;
         },
         (_, akd_value) => {
-            // No tombstone so hash the value found, and compare to the existence proof's value
             verify_existence_with_val::<TC>(
                 vrf_public_key,
                 root_hash,
@@ -305,12 +269,8 @@ fn verify_single_update_proof<TC: Configuration>(
     };
 
     if proof.version <= 1 {
-        // There is no previous version, so we can just return here
         return Ok(verify_result);
     }
-
-    // ***** PART 2 ***************************
-    // Verify the membership proof the for stale label of the previous version
 
     let previous_version_proof = proof.previous_version_proof.as_ref().ok_or_else(|| {
         VerificationError::HistoryProof("Missing membership proof for previous version".to_string())

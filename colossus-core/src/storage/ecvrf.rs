@@ -1,6 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! This module implements traits for managing ECVRF, mainly pertaining to storage
-//! of public and private keys
 use crate::{
     Configuration,
     akd::{
@@ -14,23 +11,14 @@ use alloc::vec::Vec;
 use async_trait::async_trait;
 use core::convert::TryInto;
 
-/// Represents a secure storage of the VRF private key. Since the VRF private key
-/// should change never (if it does, the entire tree is no longer a consistent mapping
-/// of user -> node label), it is highly recommended to back this implementation with a
-/// static cache of the private key bytes which lives for the life of the process.
-///
-/// I.e. retrieve the byte vector 1 time, and simply keep serving it up without doing
-/// network access calls
 #[async_trait]
 pub trait VRFKeyStorage: Clone + Sync + Send {
     /* ======= To be implemented ====== */
 
-    /// Retrieve the VRF Private key as a vector of bytes
     async fn retrieve(&self) -> Result<Vec<u8>, VrfError>;
 
     /* ======= Common trait functionality ====== */
 
-    /// Retrieve the properly constructed VRF Private key
     async fn get_vrf_private_key(&self) -> Result<VRFPrivateKey, VrfError> {
         match self.retrieve().await {
             Ok(bytes) => {
@@ -41,15 +29,10 @@ pub trait VRFKeyStorage: Clone + Sync + Send {
         }
     }
 
-    /// Retrieve the VRF public key
     async fn get_vrf_public_key(&self) -> Result<VRFPublicKey, VrfError> {
         self.get_vrf_private_key().await.map(|key| (&key).into())
     }
 
-    /// Returns the [NodeLabel] that corresponds to a version of the label argument.
-    ///
-    /// The stale boolean here is to indicate whether we are getting the [NodeLabel] for a fresh version,
-    /// or a version that we are retiring.
     async fn get_node_label<TC: Configuration>(
         &self,
         label: &AkdLabel,
@@ -68,11 +51,6 @@ pub trait VRFKeyStorage: Clone + Sync + Send {
         ))
     }
 
-    /// Returns the [NodeLabel] that corresponds to a version of the label argument utilizing the provided
-    /// private key.
-    ///
-    /// The stale boolean here is to indicate whether we are getting the [NodeLabel] for a fresh version,
-    /// or a version that we are retiring.
     fn get_node_label_with_expanded_key<TC: Configuration>(
         expanded_private_key: &VRFExpandedPrivateKey,
         pk: &VRFPublicKey,
@@ -90,13 +68,11 @@ pub trait VRFKeyStorage: Clone + Sync + Send {
         NodeLabel::new(output.to_truncated_bytes(), 256)
     }
 
-    /// Returns the tree nodelabel that corresponds to a vrf proof.
     async fn get_node_label_from_vrf_proof(&self, proof: Proof) -> NodeLabel {
         let output: Output = (&proof).into();
         NodeLabel::new(output.to_truncated_bytes(), 256)
     }
 
-    /// Retrieve the proof for a specific label
     async fn get_label_proof<TC: Configuration>(
         &self,
         label: &AkdLabel,
@@ -107,7 +83,6 @@ pub trait VRFKeyStorage: Clone + Sync + Send {
         Ok(Self::get_label_proof_with_key::<TC>(&key, label, freshness, version))
     }
 
-    /// Retrieve the proof for a specific label, with a supplied private key
     fn get_label_proof_with_key<TC: Configuration>(
         key: &VRFPrivateKey,
         label: &AkdLabel,
@@ -118,7 +93,6 @@ pub trait VRFKeyStorage: Clone + Sync + Send {
         key.prove(&hashed_label)
     }
 
-    /// Retrieve the output for a specific label, with a supplied private key
     fn get_label_with_key_helper<TC: Configuration>(
         expanded_private_key: &VRFExpandedPrivateKey,
         pk: &VRFPublicKey,
@@ -130,11 +104,6 @@ pub trait VRFKeyStorage: Clone + Sync + Send {
         expanded_private_key.evaluate(pk, &hashed_label)
     }
 
-    /// Returns the [NodeLabel]s that corresponds to a collection of (label, freshness, version) arguments
-    /// with only a single fetch to retrieve the VRF private key from storage.
-    ///
-    /// Note: The freshness enum here is to indicate whether we are getting the [NodeLabel] for a fresh version,
-    /// or a version that we are retiring.
     async fn get_node_labels<TC: Configuration>(
         &self,
         labels: &[(AkdLabel, VersionFreshness, u64, AkdValue)],
@@ -142,50 +111,6 @@ pub trait VRFKeyStorage: Clone + Sync + Send {
         let key = self.get_vrf_private_key().await?;
         let expanded_key = VRFExpandedPrivateKey::from(&key);
         let pk = VRFPublicKey::from(&key);
-
-        // #[cfg(feature = "parallel_vrf")]
-        // {
-        //     #[cfg(feature = "nostd")]
-        //     use alloc::format;
-
-        //     let mut join_set = tokio::task::JoinSet::new();
-        //     let labels_vec = labels.to_vec();
-        //     for (label, freshness, version, value) in labels_vec.into_iter() {
-        //         let expanded_key_ref = expanded_key.clone();
-        //         let pk_ref = pk.clone();
-
-        //         let future = {
-        //             async move {
-        //                 (
-        //                     Self::get_node_label_with_expanded_key::<TC>(
-        //                         &expanded_key_ref,
-        //                         &pk_ref,
-        //                         &label,
-        //                         freshness,
-        //                         version,
-        //                     ),
-        //                     (label, freshness, version, value),
-        //                 )
-        //             }
-        //         };
-        //         join_set.spawn(future);
-        //     }
-
-        //     let mut results = Vec::new();
-        //     while let Some(res) = join_set.join_next().await {
-        //         match res {
-        //             Err(join_err) => {
-        //                 return Err(VrfError::SigningKey(format!(
-        //                     "Parallel VRF join error {join_err}"
-        //                 )));
-        //             },
-        //             Ok((node_label, (label, freshness, version, value))) => {
-        //                 results.push(((label, freshness, version, value), node_label));
-        //             },
-        //         }
-        //     }
-        //     Ok(results)
-        // }
 
         let mut results = Vec::new();
         for (label, freshness, version, value) in labels {

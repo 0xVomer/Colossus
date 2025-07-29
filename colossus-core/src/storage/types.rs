@@ -1,6 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! Various storage and representation related types
-
 use super::traits::Storable;
 use crate::akd::{
     AkdLabel, AkdValue, Azks, AzksValue, NodeLabel,
@@ -9,36 +6,29 @@ use crate::akd::{
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 
-/// Various elements that can be stored
 #[derive(PartialEq, Eq, Debug, Hash, Clone, Copy)]
 pub enum StorageType {
-    /// Azks
     Azks = 1,
-    /// TreeNode
+
     TreeNode = 2,
-    /// EOZ: HistoryNodeState = 3 was removed from here.
-    /// Better to keep ValueState = 4 as is?
-    /// ValueState
+
     ValueState = 4,
 }
 
-/// State for a value at a given version for that key
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Deserialize, Serialize)]
 pub struct ValueStateKey(pub Vec<u8>, pub u64);
 
-/// The state of the value for a given key, starting at a particular epoch.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(bound = "")]
 pub struct ValueState {
-    /// The plaintext value of the user information in the directory
     pub value: AkdValue, // The actual value
-    /// The version of the user's value-state
+
     pub version: u64,
-    /// The Node Label
+
     pub label: NodeLabel,
-    /// The epoch this value state was published in
+
     pub epoch: u64,
-    /// The username associated to this value state (username + epoch is the record key)
+
     pub username: AkdLabel,
 }
 
@@ -104,41 +94,32 @@ impl ValueState {
     }
 }
 
-/// Data associated with a given key. That is all the states at the various epochs
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(bound = "")]
 pub struct KeyData {
-    /// The vector of states of key data for a given AkdLabel
     pub states: Vec<ValueState>,
 }
 
-/// Used to retrieve a value's state, for a given key
 #[derive(std::fmt::Debug, Clone, Copy)]
 pub enum ValueStateRetrievalFlag {
-    /// Specific version
     SpecificVersion(u64),
-    /// State at particular ep
+
     SpecificEpoch(u64),
-    /// State at epoch less than equal to given ep
+
     LeqEpoch(u64),
-    /// State at the latest epoch
+
     MaxEpoch,
-    /// State at the earliest epoch
+
     MinEpoch,
 }
 
-// == New Data Retrieval Logic == //
-
-/// This needs to be public, since anyone implementing a data-layer will need
-/// to be able to access this and all the internal types
 #[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, Serialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum DbRecord {
-    /// An Azks
     Azks(Azks),
-    /// A TreeNode
+
     TreeNode(TreeNodeWithPreviousValue),
-    /// The state of the value for a particular key.
+
     ValueState(ValueState),
 }
 
@@ -163,8 +144,6 @@ impl Clone for DbRecord {
 }
 
 impl DbRecord {
-    /// Compte a serialized id from the record's fields. This id is useful to use as key
-    /// in key-value stores.
     pub fn get_full_binary_id(&self) -> Vec<u8> {
         match &self {
             DbRecord::Azks(azks) => azks.get_full_binary_id(),
@@ -173,11 +152,6 @@ impl DbRecord {
         }
     }
 
-    /// Returns the priority in which a record type in a transaction should be committed to storage.
-    /// A smaller value indicates higher priority in being written first.
-    /// An Azks record should always be updated last, so that any concurrent storage readers will
-    /// not see an increase in the current epoch until every other record for the new epoch has
-    /// been written to storage.
     pub(crate) fn transaction_priority(&self) -> u8 {
         match &self {
             DbRecord::Azks(_) => 2,
@@ -187,13 +161,12 @@ impl DbRecord {
 
     /* Data Layer Builders */
 
-    /// Build an azks instance from the properties
     pub fn build_azks(latest_epoch: u64, num_nodes: u64) -> Azks {
         Azks { latest_epoch, num_nodes }
     }
 
     #[allow(clippy::too_many_arguments)]
-    /// Build a history tree node from the properties
+
     pub fn build_tree_node_with_previous_value(
         label_val: [u8; 32],
         label_len: u32,
@@ -251,7 +224,6 @@ impl DbRecord {
         }
     }
 
-    /// Build a user state from the properties
     pub fn build_user_state(
         username: Vec<u8>,
         plaintext_val: Vec<u8>,

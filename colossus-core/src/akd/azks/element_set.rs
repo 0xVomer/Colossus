@@ -1,9 +1,6 @@
 use super::{AzksElement, Configuration, NodeLabel, PrefixOrdering};
 use std::cmp::{Ord, Ordering};
 
-/// A set of nodes to be inserted into the tree. This abstraction denotes
-/// whether the nodes are binary searchable (i.e. all nodes have the same label
-/// length, and are sorted).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum AzksElementSet {
     BinarySearchable(Vec<AzksElement>),
@@ -35,13 +32,9 @@ impl From<Vec<AzksElement>> for AzksElementSet {
 }
 
 impl AzksElementSet {
-    /// Partition node set into "left" and "right" sets, based on a given
-    /// prefix label. Note: the label *must* be a common prefix of all nodes in
-    /// the set.
     pub(crate) fn partition(self, prefix_label: NodeLabel) -> (AzksElementSet, AzksElementSet) {
         match self {
             AzksElementSet::BinarySearchable(mut nodes) => {
-                // binary search for partition point
                 let partition_point = nodes.partition_point(|candidate| {
                     match prefix_label.get_prefix_ordering(candidate.label) {
                         PrefixOrdering::WithZero | PrefixOrdering::Invalid => true,
@@ -49,11 +42,9 @@ impl AzksElementSet {
                     }
                 });
 
-                // split nodes vector at partition point
                 let right = nodes.split_off(partition_point);
                 let mut left = nodes;
 
-                // drop nodes with invalid prefix ordering
                 while left.last().map(|node| prefix_label.get_prefix_ordering(node.label))
                     == Some(PrefixOrdering::Invalid)
                 {
@@ -77,18 +68,13 @@ impl AzksElementSet {
         }
     }
 
-    /// Get the longest common prefix of all nodes in the set.
     pub(crate) fn get_longest_common_prefix<TC: Configuration>(&self) -> NodeLabel {
         match self {
-            AzksElementSet::BinarySearchable(nodes) => {
-                // the LCP of a set of sorted, equal length labels is the LCP of
-                // the first and last label
-                match (nodes.first(), nodes.last()) {
-                    (Some(first), Some(last)) => {
-                        first.label.get_longest_common_prefix::<TC>(last.label)
-                    },
-                    _ => TC::empty_label(),
-                }
+            AzksElementSet::BinarySearchable(nodes) => match (nodes.first(), nodes.last()) {
+                (Some(first), Some(last)) => {
+                    first.label.get_longest_common_prefix::<TC>(last.label)
+                },
+                _ => TC::empty_label(),
             },
             AzksElementSet::Unsorted(nodes) => {
                 if nodes.is_empty() {
@@ -101,7 +87,6 @@ impl AzksElementSet {
         }
     }
 
-    /// Check if the set contains a node with a given prefix.
     pub(crate) fn contains_prefix(&self, prefix_label: &NodeLabel) -> bool {
         match self {
             AzksElementSet::BinarySearchable(nodes) => nodes

@@ -1,5 +1,3 @@
-//! Forked Code from Meta Platforms AKD repository: https://github.com/facebook/akd
-//! Code for an auditor of a authenticated key directory
 use super::{
     Azks, AzksParallelismConfig, AzksValue, Configuration, Digest, InsertMode,
     errors::{AkdError, AuditorError, AzksError},
@@ -7,7 +5,6 @@ use super::{
 };
 use crate::storage::{manager::StorageManager, memory::AsyncInMemoryDatabase};
 
-/// Verifies an audit proof, given start and end hashes for a merkle patricia tree.
 #[tracing::instrument(skip_all)]
 pub async fn audit_verify<TC: Configuration>(
     hashes: Vec<Digest>,
@@ -43,7 +40,6 @@ pub async fn audit_verify<TC: Configuration>(
     Ok(())
 }
 
-/// Helper for audit, verifies an append-only proof.
 #[tracing::instrument(skip_all)]
 pub async fn verify_consecutive_append_only<TC: Configuration>(
     proof: &SingleAppendOnlyProof,

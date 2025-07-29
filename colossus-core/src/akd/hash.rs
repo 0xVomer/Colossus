@@ -1,18 +1,12 @@
-//! This module contains all the hashing utilities needed for the AKD directory
-//! and verification operations
-
 use alloc::format;
 use alloc::string::String;
 
-/// A hash digest of a specified number of bytes
 pub type Digest = [u8; DIGEST_BYTES];
-/// Represents an empty digest, with no data contained
+
 pub const EMPTY_DIGEST: [u8; DIGEST_BYTES] = [0u8; DIGEST_BYTES];
-/// The number of bytes in a digest
+
 pub const DIGEST_BYTES: usize = 32;
 
-/// Try and parse a digest from an unknown length of bytes. Helpful for converting a `Vec<u8>`
-/// to a [Digest]
 pub fn try_parse_digest(value: &[u8]) -> Result<Digest, String> {
     if value.len() != DIGEST_BYTES {
         Err(format!(
@@ -28,7 +22,6 @@ pub fn try_parse_digest(value: &[u8]) -> Result<Digest, String> {
 }
 
 mod test {
-    //! Tests for hashing
 
     #[test]
     fn test_try_parse_digest() {
