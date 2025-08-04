@@ -8,6 +8,7 @@ use crate::{
         MIN_TRACING_LEVEL, SHARED_SECRET_LENGTH, XEnc,
         traits::{AE, KemAc, PkeAc},
     },
+    dac::keypair::IssuerPublic,
     policy::{AccessPolicy, Error},
 };
 pub use capability::{
@@ -67,9 +68,20 @@ impl AccessControl {
         refresh_capability_authority(
             &mut *self.rng.lock().expect("Mutex lock failed!"),
             auth,
-            auth.access_structure.ap_to_usk_rights(ap)?,
+            auth.access_structure.ap_to_access_rights(ap)?,
         )?;
         auth.rpk()
+    }
+
+    pub fn register_issuer(
+        &self,
+        auth: &mut CapabilityAuthority,
+        issuer: &IssuerPublic,
+    ) -> Result<(usize, CapabilityAuthorityPublicKey), Error> {
+        let id =
+            auth.register_issuer(issuer, &mut *self.rng.lock().expect("Mutex lock failed!"))?;
+        let rpk = auth.rpk()?;
+        Ok((id, rpk))
     }
 
     pub fn prune_capability_authority(
@@ -77,7 +89,7 @@ impl AccessControl {
         auth: &mut CapabilityAuthority,
         ap: &AccessPolicy,
     ) -> Result<CapabilityAuthorityPublicKey, Error> {
-        prune_capability_authority(auth, &auth.access_structure.ap_to_usk_rights(ap)?);
+        prune_capability_authority(auth, &auth.access_structure.ap_to_access_rights(ap)?);
         auth.rpk()
     }
 
@@ -89,7 +101,7 @@ impl AccessControl {
         create_capability_token(
             &mut *self.rng.lock().expect("Mutex lock failed!"),
             auth,
-            auth.access_structure.ap_to_usk_rights(ap)?,
+            auth.access_structure.ap_to_access_rights(ap)?,
         )
     }
     pub fn refresh_capability(

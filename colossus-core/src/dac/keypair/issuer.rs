@@ -1,10 +1,10 @@
 use super::{
-    AliasProof, CBORCodec, Credential, Entry, IssuerError, MaxCardinality, MaxEntries, Signature,
-    verify,
+    AccessCredential, AliasProof, Attributes, CBORCodec, IssuerError, MaxCardinality, MaxEntries,
+    Signature, verify,
 };
 use crate::{
     dac::{
-        builder::CredentialBuilder,
+        builder::AccessCredentialBuilder,
         ec::Scalar,
         keys::{VK, VKCompressed},
         set_commits::{
@@ -177,22 +177,44 @@ impl Issuer {
         }
     }
 
-    pub fn credential(&self) -> CredentialBuilder {
-        CredentialBuilder::new(self)
+    pub fn restruct(&mut self, access_structure: &AccessStructure) {
+        let rng = CsRng::from_entropy();
+        let l_message = MaxEntries(access_structure.no_attributes());
+
+        let sk = SecretBox::new(Box::new(
+            (0..l_message.0 + 2).map(|_| Scalar::random(rng.clone())).collect::<Vec<_>>(),
+        ));
+
+        let mut vk: Vec<VK> = sk
+            .expose_secret()
+            .iter()
+            .map(|sk_i| VK::G2(G2Projective::mul_by_generator(sk_i)))
+            .collect::<Vec<_>>();
+
+        let x_0 = G1Projective::mul_by_generator(&sk.expose_secret()[0]);
+        vk.insert(0, VK::G1(x_0)); // vk is now of length l_message + 1 (or sk + 1)
+
+        self.sk = sk;
+        self.public.vk = vk;
+        self.public.access_structure = access_structure.clone();
     }
 
-    pub fn issue_cred(
+    pub fn access_credential<'a>(&'a self) -> AccessCredentialBuilder<'a> {
+        AccessCredentialBuilder::new(self)
+    }
+
+    pub fn issue_access_cred(
         &self,
-        attr_vector: &[Entry],
+        attributes: &[Attributes],
         k_prime: Option<usize>,
         alias_proof: &AliasProof,
         nonce: Option<&Nonce>,
-    ) -> Result<Credential, IssuerError> {
+    ) -> Result<AccessCredential, IssuerError> {
         if !DamgardTransform::verify(alias_proof, nonce) {
             return Err(IssuerError::InvalidAliasProof);
         }
 
-        let cred = self.sign(&alias_proof.public_key.into(), attr_vector, k_prime)?;
+        let cred = self.sign(&alias_proof.public_key.into(), attributes, k_prime)?;
         assert!(verify(
             &self.public.vk,
             &alias_proof.public_key.into(),
@@ -205,9 +227,9 @@ impl Issuer {
     fn sign(
         &self,
         pk_u: &G1Projective,
-        messages_vector: &[Entry],
+        messages_vector: &[Attributes],
         k_prime: Option<usize>,
-    ) -> Result<Credential, IssuerError> {
+    ) -> Result<AccessCredential, IssuerError> {
         let rng = CsRng::from_entropy();
 
         if messages_vector
@@ -268,7 +290,7 @@ impl Issuer {
                 }
                 update_key = Some(usign);
 
-                return Ok(Credential {
+                return Ok(AccessCredential {
                     sigma,
                     update_key,
                     commitment_vector,
@@ -278,7 +300,7 @@ impl Issuer {
             }
         }
 
-        Ok(Credential {
+        Ok(AccessCredential {
             sigma,
             update_key,
             commitment_vector,

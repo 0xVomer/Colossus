@@ -138,6 +138,10 @@ where
     pub fn retain(&mut self, f: impl Fn(&K) -> bool) {
         self.map.retain(|key, _| f(key));
     }
+
+    pub fn extend(&mut self, with: RevisionMap<K, V>) {
+        self.map.extend(with.map);
+    }
 }
 
 #[cfg(test)]

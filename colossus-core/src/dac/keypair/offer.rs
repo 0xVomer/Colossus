@@ -1,23 +1,23 @@
-use super::{CBORCodec, Credential, spseq_uc::CredentialCompressed};
+use super::{AccessCredential, CBORCodec, spseq_uc::AccessCredentialCompressed};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Offer(pub(crate) Credential);
+pub struct Offer(pub(crate) AccessCredential);
 
-impl AsRef<Credential> for Offer {
-    fn as_ref(&self) -> &Credential {
+impl AsRef<AccessCredential> for Offer {
+    fn as_ref(&self) -> &AccessCredential {
         &self.0
     }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct OfferCompressed(CredentialCompressed);
+pub struct OfferCompressed(AccessCredentialCompressed);
 
 impl CBORCodec for OfferCompressed {}
 
 impl Deref for Offer {
-    type Target = Credential;
+    type Target = AccessCredential;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -38,33 +38,33 @@ impl TryFrom<OfferCompressed> for Offer {
     }
 }
 
-impl TryFrom<CredentialCompressed> for Offer {
+impl TryFrom<AccessCredentialCompressed> for Offer {
     type Error = crate::dac::error::Error;
 
-    fn try_from(cred: CredentialCompressed) -> Result<Self, Self::Error> {
+    fn try_from(cred: AccessCredentialCompressed) -> Result<Self, Self::Error> {
         Ok(Offer(cred.try_into()?))
     }
 }
 
-impl From<CredentialCompressed> for OfferCompressed {
-    fn from(cred: CredentialCompressed) -> Self {
+impl From<AccessCredentialCompressed> for OfferCompressed {
+    fn from(cred: AccessCredentialCompressed) -> Self {
         OfferCompressed(cred)
     }
 }
 
-impl From<Offer> for Credential {
+impl From<Offer> for AccessCredential {
     fn from(offer: Offer) -> Self {
         offer.0
     }
 }
 
-impl From<Credential> for Offer {
-    fn from(cred: Credential) -> Self {
+impl From<AccessCredential> for Offer {
+    fn from(cred: AccessCredential) -> Self {
         Offer(cred)
     }
 }
 
-impl From<OfferCompressed> for CredentialCompressed {
+impl From<OfferCompressed> for AccessCredentialCompressed {
     fn from(offer: OfferCompressed) -> Self {
         offer.0
     }
@@ -74,7 +74,7 @@ impl TryFrom<OfferCompressed> for Vec<u8> {
     type Error = crate::dac::error::Error;
 
     fn try_from(value: OfferCompressed) -> Result<Self, Self::Error> {
-        let cred: CredentialCompressed = value.into();
+        let cred: AccessCredentialCompressed = value.into();
         Ok(cred.to_cbor()?)
     }
 }
@@ -83,7 +83,7 @@ impl TryFrom<Vec<u8>> for OfferCompressed {
     type Error = crate::dac::error::Error;
 
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        let cred = CredentialCompressed::from_cbor(&value)?;
+        let cred = AccessCredentialCompressed::from_cbor(&value)?;
         Ok(cred.into())
     }
 }

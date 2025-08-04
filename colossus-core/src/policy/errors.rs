@@ -15,6 +15,7 @@ pub enum PolicyError {
     DimensionNotFound(String),
     ConversionFailed(String),
     Tracing(String),
+    IncompatibleDimensions,
 }
 
 impl Display for PolicyError {
@@ -35,6 +36,7 @@ impl Display for PolicyError {
             Self::ConversionFailed(err) => write!(f, "Conversion failed: {err}"),
             Self::OperationNotPermitted(err) => write!(f, "Operation not permitted: {err}"),
             Self::Tracing(err) => write!(f, "tracing error: {err}"),
+            Self::IncompatibleDimensions => write!(f, "incompatible dimensions"),
         }
     }
 }

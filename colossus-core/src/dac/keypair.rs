@@ -8,8 +8,9 @@ mod signature;
 pub mod spseq_uc;
 
 use super::{
+    Attributes,
     ec::{Scalar, curve::pairing},
-    entry::{Entry, MaxEntries, entry_to_scalar},
+    entry::{MaxEntries, entry_to_scalar},
     keys::VK,
     set_commits::{Commitment, CrossSetCommitment, ParamSetCommitment},
     zkp::{DamgardTransform, Nonce},
@@ -28,7 +29,7 @@ pub use error::{IssuerError, UpdateError};
 pub use issuer::{Issuer, IssuerPublic, IssuerPublicCompressed};
 pub use offer::{Offer, OfferCompressed};
 pub use signature::{Signature, SignatureCompressed};
-pub use spseq_uc::Credential;
+pub use spseq_uc::AccessCredential;
 use std::{
     fmt::Display,
     ops::{Deref, Mul},
@@ -123,7 +124,7 @@ pub fn verify(
 pub fn verify_proof(
     issuer_public: &IssuerPublic,
     proof: &CredProof,
-    selected_attrs: &[Entry],
+    selected_attrs: &[Attributes],
     nonce: Option<&Nonce>,
 ) -> bool {
     let commitment_vectors = proof

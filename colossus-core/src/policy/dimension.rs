@@ -80,10 +80,33 @@ impl Dimension {
         }
     }
 
-    pub fn get_attributes_name(&self) -> Box<dyn '_ + Iterator<Item = &ATTRIBUTE>> {
+    pub fn get_attribute_ids(&self) -> Box<dyn '_ + Iterator<Item = &ATTRIBUTE>> {
         match self {
             Self::Anarchy(attributes) => Box::new(attributes.keys()),
             Self::Hierarchy(attributes) => Box::new(attributes.keys()),
+        }
+    }
+
+    pub fn get_attribute_id(&self, index: usize) -> Option<&ATTRIBUTE> {
+        match self {
+            Self::Anarchy(attributes) => attributes.keys().nth(index),
+            Self::Hierarchy(attributes) => attributes.keys().nth(index),
+        }
+    }
+
+    pub fn get_attribute_pairs(&self) -> Box<dyn '_ + Iterator<Item = (&ATTRIBUTE, &ATTRIBUTE)>> {
+        match self {
+            Self::Anarchy(attributes) => Box::new(attributes.keys().zip(attributes.keys().skip(1))),
+            Self::Hierarchy(attributes) => {
+                Box::new(attributes.keys().zip(attributes.keys().skip(1)))
+            },
+        }
+    }
+
+    pub fn has_attribute(&self, attr: &ATTRIBUTE) -> bool {
+        match self {
+            Self::Anarchy(attributes) => attributes.contains_key(attr),
+            Self::Hierarchy(attributes) => attributes.contains_key(attr),
         }
     }
 

@@ -17,8 +17,11 @@ impl std::fmt::Display for UpdateError {
 pub enum IssuerError {
     TooLargeCardinality,
     TooLongEntries,
+    AttributesNotCovered,
     InvalidAliasProof,
     UpdateError(String),
+    AccessStructureError(String),
+    AccessRightsNotCovered,
 }
 
 impl std::error::Error for IssuerError {}
@@ -38,6 +41,15 @@ impl std::fmt::Display for IssuerError {
                 write!(f, "InvalidAliasProof. The proof of the pseudoalias is invalid.")
             },
             IssuerError::UpdateError(e) => write!(f, "UpdateError: {}", e),
+            IssuerError::AttributesNotCovered => write!(
+                f,
+                "AttributesNotCovered. The attributes you passed are not covered by the issuer's access structure."
+            ),
+            IssuerError::AccessRightsNotCovered => write!(
+                f,
+                "AccessRightsNotCovered. The access rights you passed are not covered by your credential."
+            ),
+            IssuerError::AccessStructureError(e) => write!(f, "AccessStructureError: {}", e),
         }
     }
 }

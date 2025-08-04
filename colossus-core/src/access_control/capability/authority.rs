@@ -1,5 +1,9 @@
 use super::*;
-use crate::dac::keys::VK;
+use crate::dac::{
+    entry::Entry,
+    keypair::{CBORCodec, CredProof, IssuerPublic, IssuerPublicCompressed},
+    zkp::Nonce,
+};
 
 #[derive(Debug, PartialEq)]
 pub struct CapabilityAuthority {
@@ -12,7 +16,8 @@ pub struct CapabilityAuthority {
 
     sk_trace: <ElGamal as Nike>::SecretKey,
     tracers: LinkedList<(<ElGamal as Nike>::SecretKey, <ElGamal as Nike>::PublicKey)>,
-    // vk_registry: RevisionMap<VK, AccessStructure>,
+
+    cred_issuers: Vec<IssuerPublic>,
 }
 
 impl CapabilityAuthority {
@@ -32,7 +37,7 @@ impl CapabilityAuthority {
             sk_trace: <ElGamal as Nike>::SecretKey::random(rng),
             sk_access_rights: RevisionMap::new(),
             signing_key: Some(SymmetricKey::<SIGNING_KEY_LENGTH>::new(rng)),
-            // vk_registry: RevisionMap::new(),
+            cred_issuers: Vec::new(),
             tracers: (0..=tracing_level).map(|_| ElGamal::keygen(rng)).collect::<Result<_, _>>()?,
         })
     }
@@ -40,6 +45,47 @@ impl CapabilityAuthority {
     pub fn count(&self) -> usize {
         self.sk_access_rights.len()
     }
+
+    pub fn register_issuer(
+        &mut self,
+        pk: &IssuerPublic,
+        rng: &mut impl CryptoRngCore,
+    ) -> Result<usize, Error> {
+        // extend access structure to include issuer's access structure
+        self.access_structure.extend(&pk.access_structure)?;
+        let rights = self.access_structure.omega()?;
+
+        let mut secrets = take(&mut self.sk_access_rights);
+        secrets.retain(|r| rights.contains_key(r));
+
+        for (r, status) in rights {
+            if let Some((is_activated, _)) = secrets.get_latest_mut(&r) {
+                *is_activated = AttributeStatus::EncryptDecrypt == status;
+            } else {
+                if AttributeStatus::DecryptOnly == status {
+                    return Err(Error::OperationNotPermitted(
+                        "cannot add decrypt only secret".to_string(),
+                    ));
+                }
+                let secret = AccessRightSecretKey::random(rng)?;
+                secrets.insert(r, (true, secret));
+            }
+        }
+        self.sk_access_rights = secrets;
+        self.cred_issuers.push(pk.clone());
+        Ok(self.cred_issuers.len())
+    }
+
+    // pub fn authorize_access_rights(
+    //     &mut self,
+    //     issuer: &IssuerPublic,
+    //     claims: &Entry,
+    //     rights: HashSet<Right>,
+    //     cred: &CredProof,
+    //     nonce: Option<&Nonce>,
+    // ) -> Result<(), Error> {
+    //     //let access_rights = self.access_structure.ap_to_access_rights()?;
+    // }
 
     fn get_latest_access_right_sk<'a>(
         &'a self,
@@ -189,16 +235,16 @@ impl CapabilityAuthority {
         let mut enc_ss = None;
         let mut rights = HashSet::with_capacity(cap.count());
         let mut try_decaps = |right: &Right,
-                              K1: &mut <ElGamal as Nike>::PublicKey,
-                              K2: Option<Secret<SHARED_SECRET_LENGTH>>,
+                              k1: &mut <ElGamal as Nike>::PublicKey,
+                              k2: Option<Secret<SHARED_SECRET_LENGTH>>,
                               F| {
-            let S_ij = xor_in_place(H_hash(K1, K2.as_ref(), &T)?, F);
+            let S_ij = xor_in_place(H_hash(k1, k2.as_ref(), &T)?, F);
             let (tag_ij, ss) = J_hash(&S_ij, &U);
             if cap.tag == tag_ij {
                 let r = G_hash(&S_ij)?;
                 let c_ij = self.set_traps(&r);
                 if cap.c == c_ij {
-                    K1.zeroize();
+                    k1.zeroize();
                     enc_ss = Some(ss);
                     rights.insert(right.clone());
                 }
@@ -210,9 +256,9 @@ impl CapabilityAuthority {
             for (right, secret_set) in self.sk_access_rights.iter() {
                 for (is_activated, secret) in secret_set {
                     if *is_activated {
-                        let mut K1 = ElGamal::session_key(&secret.sk, &A)?;
-                        let K2 = MlKem::dec(&secret.dk, &E)?;
-                        try_decaps(right, &mut K1, Some(K2), &F)?;
+                        let mut k1 = ElGamal::session_key(&secret.sk, &A)?;
+                        let k2 = MlKem::dec(&secret.dk, &E)?;
+                        try_decaps(right, &mut k1, Some(k2), &F)?;
                     }
                 }
             }
@@ -348,111 +394,6 @@ impl CapabilityAuthority {
     }
 }
 
-impl Serializable for CapabilityAuthority {
-    type Error = Error;
-
-    fn length(&self) -> usize {
-        self.sk_trace.length()
-            + to_leb128_len(self.capabilities.len())
-            + self.capabilities.iter().map(Serializable::length).sum::<usize>()
-            + to_leb128_len(self.tracers.len())
-            + self.tracers.iter().map(|(sk, pk)| sk.length() + pk.length()).sum::<usize>()
-            + to_leb128_len(self.sk_access_rights.len())
-            + self
-                .sk_access_rights
-                .iter()
-                .map(|(coordinate, chain)| {
-                    coordinate.length()
-                        + to_leb128_len(chain.len())
-                        + chain.iter().map(|(_, k)| 1 + k.length()).sum::<usize>()
-                })
-                .sum::<usize>()
-            + self.signing_key.as_ref().map_or_else(|| 0, |key| key.len())
-            + self.access_structure.length()
-    }
-
-    fn write(&self, ser: &mut Serializer) -> Result<usize, Self::Error> {
-        let mut n = self.sk_trace.write(ser)?;
-
-        n += ser.write_leb128_u64(self.tracers.len() as u64)?;
-        for (sk, pk) in &self.tracers {
-            n += ser.write(sk)?;
-            n += ser.write(pk)?;
-        }
-
-        n = ser.write_leb128_u64(self.capabilities.len() as u64)?;
-        for id in &self.capabilities {
-            n += ser.write(id)?;
-        }
-
-        n += ser.write_leb128_u64(self.sk_access_rights.len() as u64)?;
-        for (coordinate, chain) in &self.sk_access_rights.map {
-            n += ser.write(coordinate)?;
-            n += ser.write_leb128_u64(chain.len() as u64)?;
-            for (is_activated, sk) in chain {
-                n += ser.write_leb128_u64((*is_activated).into())?;
-                n += ser.write(sk)?;
-            }
-        }
-        if let Some(kmac_key) = &self.signing_key {
-            n += ser.write_array(&**kmac_key)?;
-        }
-        n += ser.write(&self.access_structure)?;
-        Ok(n)
-    }
-
-    fn read(de: &mut Deserializer) -> Result<Self, Self::Error> {
-        let sk = de.read()?;
-
-        let n_tracers = <usize>::try_from(de.read_leb128_u64()?)?;
-        let mut tracers = LinkedList::new();
-        for _ in 0..n_tracers {
-            let sk = de.read()?;
-            let pk = de.read()?;
-            tracers.push_back((sk, pk));
-        }
-
-        let n_capabilities = <usize>::try_from(de.read_leb128_u64()?)?;
-        let mut capabilities = HashSet::with_capacity(n_capabilities);
-        for _ in 0..n_capabilities {
-            let id = de.read()?;
-            capabilities.insert(id);
-        }
-
-        let n_coordinates = <usize>::try_from(de.read_leb128_u64()?)?;
-        let mut coordinate_keypairs = RevisionMap::with_capacity(n_coordinates);
-        for _ in 0..n_coordinates {
-            let coordinate = de.read()?;
-            let n_keys = <usize>::try_from(de.read_leb128_u64()?)?;
-            let chain = (0..n_keys)
-                .map(|_| -> Result<_, Error> {
-                    let is_activated = de.read_leb128_u64()? == 1;
-                    let sk = de.read::<AccessRightSecretKey>()?;
-                    Ok((is_activated, sk))
-                })
-                .collect::<Result<LinkedList<_>, _>>()?;
-            coordinate_keypairs.map.insert(coordinate, chain);
-        }
-
-        let signing_key = if de.value().len() < SIGNING_KEY_LENGTH {
-            None
-        } else {
-            Some(SymmetricKey::try_from_bytes(de.read_array::<SIGNING_KEY_LENGTH>()?)?)
-        };
-
-        let access_structure = de.read()?;
-
-        Ok(Self {
-            sk_trace: sk,
-            capabilities,
-            tracers,
-            sk_access_rights: coordinate_keypairs,
-            signing_key,
-            access_structure,
-        })
-    }
-}
-
 #[derive(Debug, PartialEq)]
 pub struct CapabilityAuthorityPublicKey {
     pub tpk: TracingPublicKey,
@@ -511,9 +452,9 @@ impl CapabilityAuthorityPublicKey {
         let rights = access_rights
             .iter()
             .map(|subkey| {
-                let K1 = ElGamal::session_key(&r, &subkey.h)?;
-                let (K2, E) = MlKem::enc(&subkey.ek, rng)?;
-                Ok((K1, K2, E))
+                let k1 = ElGamal::session_key(&r, &subkey.h)?;
+                let (k2, E) = MlKem::enc(&subkey.ek, rng)?;
+                Ok((k1, k2, E))
             })
             .collect::<Result<Vec<_>, Error>>()?;
 
@@ -534,9 +475,9 @@ impl CapabilityAuthorityPublicKey {
 
         let encs = rights
             .into_iter()
-            .map(|(mut K1, K2, E)| -> Result<_, _> {
-                let F = xor_2(&rng_secret, &*H_hash(&K1, Some(&K2), &T)?);
-                K1.zeroize();
+            .map(|(mut k1, k2, E)| -> Result<_, _> {
+                let F = xor_2(&rng_secret, &*H_hash(&k1, Some(&k2), &T)?);
+                k1.zeroize();
                 Ok((E, F))
             })
             .collect::<Result<Vec<_>, Error>>()?;
@@ -560,50 +501,6 @@ impl CapabilityAuthorityPublicKey {
                 encapsulations: Encapsulations(encs),
             },
         ))
-    }
-}
-
-impl Serializable for CapabilityAuthorityPublicKey {
-    type Error = Error;
-
-    fn length(&self) -> usize {
-        self.tpk.length()
-            + to_leb128_len(self.pk_access_rights.len())
-            + self
-                .pk_access_rights
-                .iter()
-                .map(|(access_right, pk)| access_right.length() + pk.length())
-                .sum::<usize>()
-            + self.access_structure.length()
-    }
-
-    fn write(&self, ser: &mut Serializer) -> Result<usize, Self::Error> {
-        let mut n = ser.write(&self.tpk)?;
-        n += ser.write_leb128_u64(self.pk_access_rights.len() as u64)?;
-        for (access_right, pk) in &self.pk_access_rights {
-            n += ser.write(access_right)?;
-            n += ser.write(pk)?;
-        }
-        n += ser.write(&self.access_structure)?;
-
-        Ok(n)
-    }
-
-    fn read(de: &mut Deserializer) -> Result<Self, Self::Error> {
-        let tpk = de.read::<TracingPublicKey>()?;
-        let n_rights = <usize>::try_from(de.read_leb128_u64()?)?;
-        let mut access_rights = HashMap::with_capacity(n_rights);
-        for _ in 0..n_rights {
-            let acess_right = de.read::<Right>()?;
-            let pk = de.read::<AccessRightPublicKey>()?;
-            access_rights.insert(acess_right, pk);
-        }
-        let access_structure = de.read::<AccessStructure>()?;
-        Ok(Self {
-            tpk,
-            pk_access_rights: access_rights,
-            access_structure,
-        })
     }
 }
 
@@ -737,4 +634,178 @@ pub fn create_capability_token(
         sk_access_rights: coordinate_keys,
         signature,
     })
+}
+
+impl Serializable for CapabilityAuthority {
+    type Error = Error;
+
+    fn length(&self) -> usize {
+        self.sk_trace.length()
+            + to_leb128_len(self.capabilities.len())
+            + self.capabilities.iter().map(Serializable::length).sum::<usize>()
+            + to_leb128_len(self.tracers.len())
+            + self.tracers.iter().map(|(sk, pk)| sk.length() + pk.length()).sum::<usize>()
+            + to_leb128_len(self.sk_access_rights.len())
+            + self
+                .sk_access_rights
+                .iter()
+                .map(|(coordinate, chain)| {
+                    coordinate.length()
+                        + to_leb128_len(chain.len())
+                        + chain.iter().map(|(_, k)| 1 + k.length()).sum::<usize>()
+                })
+                .sum::<usize>()
+            + self.signing_key.as_ref().map_or_else(|| 0, |key| key.len())
+            + self.access_structure.length()
+            + to_leb128_len(self.cred_issuers.len())
+            + self
+                .cred_issuers
+                .iter()
+                .map(|issuer| {
+                    let issuer_cbor = issuer.to_compact().to_cbor().unwrap();
+                    issuer_cbor.len()
+                })
+                .sum::<usize>()
+    }
+
+    fn write(&self, ser: &mut Serializer) -> Result<usize, Self::Error> {
+        let mut n = self.sk_trace.write(ser)?;
+
+        n += ser.write_leb128_u64(self.tracers.len() as u64)?;
+        for (sk, pk) in &self.tracers {
+            n += ser.write(sk)?;
+            n += ser.write(pk)?;
+        }
+
+        n += ser.write_leb128_u64(self.capabilities.len() as u64)?;
+        for id in &self.capabilities {
+            n += ser.write(id)?;
+        }
+
+        n += ser.write_leb128_u64(self.sk_access_rights.len() as u64)?;
+        for (coordinate, chain) in &self.sk_access_rights.map {
+            n += ser.write(coordinate)?;
+            n += ser.write_leb128_u64(chain.len() as u64)?;
+            for (is_activated, sk) in chain {
+                n += ser.write_leb128_u64((*is_activated).into())?;
+                n += ser.write(sk)?;
+            }
+        }
+        if let Some(kmac_key) = &self.signing_key {
+            n += ser.write_array(&**kmac_key)?;
+        }
+        n += ser.write(&self.access_structure)?;
+
+        n += ser.write_leb128_u64(self.cred_issuers.len() as u64)?;
+        for issuer in &self.cred_issuers {
+            let issuer_cbor = issuer.to_compact().to_cbor().unwrap();
+            n += ser.write_vec(&issuer_cbor)?;
+        }
+        Ok(n)
+    }
+
+    fn read(de: &mut Deserializer) -> Result<Self, Self::Error> {
+        let sk = de.read()?;
+
+        let n_tracers = <usize>::try_from(de.read_leb128_u64()?)?;
+        let mut tracers = LinkedList::new();
+        for _ in 0..n_tracers {
+            let sk = de.read()?;
+            let pk = de.read()?;
+            tracers.push_back((sk, pk));
+        }
+
+        let n_capabilities = <usize>::try_from(de.read_leb128_u64()?)?;
+        let mut capabilities = HashSet::with_capacity(n_capabilities);
+        for _ in 0..n_capabilities {
+            let id = de.read()?;
+            capabilities.insert(id);
+        }
+
+        let n_coordinates = <usize>::try_from(de.read_leb128_u64()?)?;
+        let mut coordinate_keypairs = RevisionMap::with_capacity(n_coordinates);
+        for _ in 0..n_coordinates {
+            let coordinate = de.read()?;
+            let n_keys = <usize>::try_from(de.read_leb128_u64()?)?;
+            let chain = (0..n_keys)
+                .map(|_| -> Result<_, Error> {
+                    let is_activated = de.read_leb128_u64()? == 1;
+                    let sk = de.read::<AccessRightSecretKey>()?;
+                    Ok((is_activated, sk))
+                })
+                .collect::<Result<LinkedList<_>, _>>()?;
+            coordinate_keypairs.map.insert(coordinate, chain);
+        }
+
+        let signing_key = if de.value().len() < SIGNING_KEY_LENGTH {
+            None
+        } else {
+            Some(SymmetricKey::try_from_bytes(de.read_array::<SIGNING_KEY_LENGTH>()?)?)
+        };
+
+        let access_structure = de.read()?;
+
+        let n_issuers = <usize>::try_from(de.read_leb128_u64()?)?;
+        let mut issuers = Vec::new();
+        for _ in 0..n_issuers {
+            let issuer_cbor_bytes = de.read_vec()?;
+            let issuer_compressed = IssuerPublicCompressed::from_cbor(&issuer_cbor_bytes).unwrap();
+            let issuer = IssuerPublic::try_from(issuer_compressed).unwrap();
+            issuers.push(issuer);
+        }
+
+        Ok(Self {
+            sk_trace: sk,
+            capabilities,
+            tracers,
+            sk_access_rights: coordinate_keypairs,
+            signing_key,
+            access_structure,
+            cred_issuers: issuers,
+        })
+    }
+}
+
+impl Serializable for CapabilityAuthorityPublicKey {
+    type Error = Error;
+
+    fn length(&self) -> usize {
+        self.tpk.length()
+            + to_leb128_len(self.pk_access_rights.len())
+            + self
+                .pk_access_rights
+                .iter()
+                .map(|(access_right, pk)| access_right.length() + pk.length())
+                .sum::<usize>()
+            + self.access_structure.length()
+    }
+
+    fn write(&self, ser: &mut Serializer) -> Result<usize, Self::Error> {
+        let mut n = ser.write(&self.tpk)?;
+        n += ser.write_leb128_u64(self.pk_access_rights.len() as u64)?;
+        for (access_right, pk) in &self.pk_access_rights {
+            n += ser.write(access_right)?;
+            n += ser.write(pk)?;
+        }
+        n += ser.write(&self.access_structure)?;
+
+        Ok(n)
+    }
+
+    fn read(de: &mut Deserializer) -> Result<Self, Self::Error> {
+        let tpk = de.read::<TracingPublicKey>()?;
+        let n_rights = <usize>::try_from(de.read_leb128_u64()?)?;
+        let mut access_rights = HashMap::with_capacity(n_rights);
+        for _ in 0..n_rights {
+            let acess_right = de.read::<Right>()?;
+            let pk = de.read::<AccessRightPublicKey>()?;
+            access_rights.insert(acess_right, pk);
+        }
+        let access_structure = de.read::<AccessStructure>()?;
+        Ok(Self {
+            tpk,
+            pk_access_rights: access_rights,
+            access_structure,
+        })
+    }
 }

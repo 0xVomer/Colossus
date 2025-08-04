@@ -1,6 +1,7 @@
 use super::Error;
 use cosmian_crypto_core::bytes_ser_de::{Deserializer, Serializable, Serializer, to_leb128_len};
 use std::ops::Deref;
+use tiny_keccak::{Hasher, Sha3};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub struct Right(pub(crate) Vec<u8>);
@@ -34,6 +35,23 @@ impl Right {
             ser.write_leb128_u64(u64::try_from(value)?)?;
         }
         Ok(Self(ser.finalize().to_vec()))
+    }
+
+    pub fn hash_from_point(mut attribute_ids: Vec<usize>) -> Result<Self, Error> {
+        let mut hasher = Sha3::v256();
+        let mut digest = [0u8; 32];
+
+        attribute_ids.sort_unstable();
+
+        let mut ser = Serializer::with_capacity(4 * attribute_ids.len());
+        for value in attribute_ids {
+            ser.write_leb128_u64(u64::try_from(value)?)?;
+        }
+
+        hasher.update(&ser.finalize());
+        hasher.finalize(&mut digest);
+
+        Ok(Self(digest.to_vec()))
     }
 }
 
