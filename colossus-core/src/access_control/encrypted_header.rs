@@ -52,10 +52,10 @@ impl EncryptedHeader {
     pub fn decrypt(
         &self,
         api: &AccessControl,
-        usk: &AccessCapabilityToken,
+        cap_token: &AccessCapabilityToken,
         authentication_data: Option<&[u8]>,
     ) -> Result<Option<CleartextHeader>, Error> {
-        api.decaps(usk, &self.encapsulation)?
+        api.decaps(cap_token, &self.encapsulation)?
             .map(|seed| {
                 let metadata = self
                     .encrypted_metadata

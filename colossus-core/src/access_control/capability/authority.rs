@@ -83,6 +83,8 @@ impl CapabilityAuthority {
         nonce: &Nonce,
     ) -> Result<AccessCapabilityToken, Error> {
         let mut attribute_set: HashSet<QualifiedAttribute> = HashSet::new();
+        let mut dim_set: HashSet<String> = HashSet::new();
+
         // verify each claim and collect the set of qualified attributes
         for claim in claims {
             // get the issuer public key from issuer_id
@@ -94,15 +96,23 @@ impl CapabilityAuthority {
             for entry in claim.attributes.iter() {
                 for attrib in entry.0.iter() {
                     attribute_set.insert(attrib.clone());
+                    dim_set.insert(attrib.dimension.clone());
                 }
             }
         }
+
+        // for every other dimensions that are not covered in the claims, we set an UNKNOWN attribute
+        for dim in self.access_structure.dimensions() {
+            if !dim_set.contains(dim) {
+                attribute_set.insert(QualifiedAttribute::new(dim, "UNKNOWN"));
+            }
+        }
+
+        // get the associated access rights
         let attributes: Vec<QualifiedAttribute> =
             attribute_set.iter().map(|attrib| attrib.clone()).collect();
 
-        // get the associated access rights
         let access_rights = self.access_structure.get_access_rights(&attributes)?;
-
         let access_right_keys = self
             .get_latest_access_right_sk(access_rights.into_iter())
             .collect::<Result<RevisionVec<_, _>, Error>>()?;

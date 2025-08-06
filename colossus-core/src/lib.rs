@@ -16,13 +16,12 @@ use configuration::Configuration;
 
 #[cfg(test)]
 mod test {
-    use std::ops::Deref;
 
     use crate::{
         access_control::{AccessClaim, AccessControl, EncryptedHeader},
         dac::{
             entry::{Entry, MaxEntries},
-            keypair::{Alias, CBORCodec, Issuer, verify_proof},
+            keypair::{Alias, Issuer},
             zkp::Nonce,
         },
         policy::{AccessPolicy, AccessStructure, QualifiedAttribute},
@@ -44,7 +43,8 @@ mod test {
             match self.0 {
                 0..=20 => "YOUTH",
                 21..=60 => "ADULT",
-                _ => "SENIOR",
+                61..=100 => "SENIOR",
+                _ => "UNKNOWN",
             }
         }
         pub fn qualify(&self) -> QualifiedAttribute {
@@ -63,12 +63,17 @@ mod test {
             QualifiedAttribute::new(Age::dimension_label(), "SENIOR")
         }
 
+        fn unkown_attribute() -> QualifiedAttribute {
+            QualifiedAttribute::new(Age::dimension_label(), "UNKNOWN")
+        }
+
         pub fn access_structure() -> Result<AccessStructure> {
             let mut ac = AccessStructure::new();
             ac.add_hierarchy(Age::dimension_label().to_string())?;
             ac.add_attribute(Age::young_attribute(), None)?;
             ac.add_attribute(Age::adult_attribute(), Some("YOUTH"))?;
             ac.add_attribute(Age::senior_attribute(), Some("ADULT"))?;
+            ac.add_attribute(Age::unkown_attribute(), Some("SENIOR"))?;
 
             Ok(ac)
         }
@@ -87,7 +92,8 @@ mod test {
             match self.0.as_str() {
                 "innercity" => "INNER_CITY",
                 "eastsydney" => "EAST_SYDNEY",
-                _ => "WEST_SYDNEY",
+                "westsydney" => "WEST_SYDNEY",
+                _ => "UNKOWN",
             }
         }
         pub fn qualify(&self) -> QualifiedAttribute {
@@ -106,12 +112,60 @@ mod test {
             QualifiedAttribute::new(Location::dimension_label(), "WEST_SYDNEY")
         }
 
+        fn unkown_attribute() -> QualifiedAttribute {
+            QualifiedAttribute::new(Location::dimension_label(), "UNKNOWN")
+        }
+
         pub fn access_structure() -> Result<AccessStructure> {
             let mut ac = AccessStructure::new();
             ac.add_anarchy(Location::dimension_label().to_string())?;
             ac.add_attribute(Location::inner_city_attribute(), None)?;
             ac.add_attribute(Location::east_sydney_attribute(), None)?;
             ac.add_attribute(Location::west_sydney_attribute(), None)?;
+            ac.add_attribute(Location::unkown_attribute(), None)?;
+
+            Ok(ac)
+        }
+    }
+
+    pub enum Sex {
+        MALE,
+        FEMALE,
+        UNKNOWN,
+    }
+
+    impl Sex {
+        fn dimension_label() -> &'static str {
+            "SEX"
+        }
+        fn attribute_label(&self) -> &'static str {
+            match self {
+                Sex::MALE => "MALE",
+                Sex::FEMALE => "FEMALE",
+                Sex::UNKNOWN => "UNKNOWN",
+            }
+        }
+        pub fn qualify(&self) -> QualifiedAttribute {
+            QualifiedAttribute::new(Sex::dimension_label(), self.attribute_label())
+        }
+
+        fn male_attribute() -> QualifiedAttribute {
+            QualifiedAttribute::new(Sex::dimension_label(), "MALE")
+        }
+
+        fn female_attribute() -> QualifiedAttribute {
+            QualifiedAttribute::new(Sex::dimension_label(), "FEMALE")
+        }
+        fn unknown_attribute() -> QualifiedAttribute {
+            QualifiedAttribute::new(Sex::dimension_label(), "UNKNOWN")
+        }
+
+        pub fn access_structure() -> Result<AccessStructure> {
+            let mut ac = AccessStructure::new();
+            ac.add_anarchy(Sex::dimension_label().to_string())?;
+            ac.add_attribute(Sex::male_attribute(), None)?;
+            ac.add_attribute(Sex::female_attribute(), None)?;
+            ac.add_attribute(Sex::unknown_attribute(), None)?;
 
             Ok(ac)
         }
@@ -165,27 +219,33 @@ mod test {
     }
 
     #[test]
-    fn test_access_control() -> Result<()> {
+    fn test_access_control_flow() -> Result<()> {
         let access_control = AccessControl::default();
         let (mut auth, _) = access_control.setup_capability_authority()?;
 
-        // Access-Credential A manages credentials that contains Age + Location attributes
+        // Access-Credential A manages credentials that contains Age + Sex attributes
         let mut access_structure_a = Age::access_structure().unwrap();
-        let location_access_structure = Location::access_structure().unwrap();
-        access_structure_a.extend(&location_access_structure).unwrap();
+        access_structure_a.extend(&Sex::access_structure().unwrap()).unwrap();
 
         let issuer_a = Issuer::setup(None, &access_structure_a);
-        access_control.register_issuer(&mut auth, &issuer_a.public)?;
+        let (issuer_a_id, _) = access_control.register_issuer(&mut auth, &issuer_a.public)?;
 
-        // Access-Credential B manages credentials that contains Device attributes
-        let issuer_b = Issuer::setup(None, &Device::access_structure().unwrap());
-        let (_, apk) = access_control.register_issuer(&mut auth, &issuer_b.public)?;
+        // Access-Credential B manages credentials that contains Device & Location attributes
+        let mut access_structure_b = Location::access_structure().unwrap();
+        access_structure_b.extend(&Device::access_structure().unwrap()).unwrap();
+
+        let issuer_b = Issuer::setup(None, &access_structure_b);
+        let (issuer_b_id, apk) = access_control.register_issuer(&mut auth, &issuer_b.public)?;
 
         // Alice creates encrypted header with Access Policy
+        // Access Policy requires Age, Location, and Device attributes but not Sex attribute
         let (secret, enc_header) = EncryptedHeader::generate(
             &access_control,
             &apk,
-            &AccessPolicy::parse("(AGE::ADULT || AGE::SENIOR) && LOC::INNER_CITY").unwrap(),
+            &AccessPolicy::parse(
+                "(AGE::ADULT || AGE::SENIOR) && LOC::INNER_CITY && DEVICE::MOBILE",
+            )
+            .unwrap(),
             Some("alice_metadata".as_bytes()),
             Some(&NONCE.to_be_bytes()),
         )
@@ -199,78 +259,83 @@ mod test {
         let bob_proof = bob.alias_proof(&NONCE);
 
         // Issuer A provides bob with age and location credential
-        let age_location_cred = issuer_a
+        let age_sex_cred = issuer_a
+            .access_credential()
+            .with_entry(Entry::new(&[Age::claim(25).qualify(), Sex::MALE.qualify()]))
+            .max_entries(&MaxEntries::default())
+            .issue_to(&bob_proof, Some(&NONCE))?;
+
+        // Issuer B provides bob with device credential
+        let device_location_cred = issuer_b
             .access_credential()
             .with_entry(Entry::new(&[
-                Age::claim(25).qualify(),
+                Device::claim(0).qualify(),
                 Location::claim("innercity".to_string()).qualify(),
             ]))
             .max_entries(&MaxEntries::default())
             .issue_to(&bob_proof, Some(&NONCE))?;
 
-        // Issuer B provides bob with device credential
-        let device_cred = issuer_b
-            .access_credential()
-            .with_entry(Entry::new(&[Device::claim(0).qualify()]))
-            .max_entries(&MaxEntries::default())
-            .issue_to(&bob_proof, Some(&NONCE))?;
-
-        // bob claims access rights from his issued credentials, known attributes and authentication nonce
+        // bob wants to claims access rights using his age & sex credential but without considering the sex attribute
         let (credential_proof_a, claimed_attributes_a) = bob
             .claim_builder(
-                &age_location_cred,
-                vec![Entry::new(&[
-                    Age::claim(25).qualify(),
-                    Location::claim("innercity".to_string()).qualify(),
-                ])],
+                &age_sex_cred,
+                vec![Entry::new(&[Age::claim(25).qualify(), Sex::MALE.qualify()])],
             )
-            .select_attribute(Age::claim(0).qualify())
-            .select_attribute(Location::claim("innercity".to_string()).qualify())
+            // Bob only selects his age attribute
+            .select_attribute(Age::claim(25).qualify())
             .generate(&NONCE)
             .map_err(|e| {
                 println!("Error generating credential proof: {}", e);
                 e
             })?;
 
-        println!("claims: {claimed_attributes_a:?}");
+        println!("Claimed Attributes A: {:?}", claimed_attributes_a);
 
+        // bob also wants to claim access rights using his device & location credential
         let (credential_proof_b, claimed_attributes_b) = bob
-            .claim_builder(&device_cred, vec![Entry::new(&[Device::claim(0).qualify()])])
+            .claim_builder(
+                &device_location_cred,
+                vec![Entry::new(&[
+                    Device::claim(0).qualify(),
+                    Location::claim("innercity".to_string()).qualify(),
+                ])],
+            )
             .select_attribute(Device::claim(0).qualify())
+            .select_attribute(Location::claim("innercity".to_string()).qualify())
             .generate(&NONCE)?;
 
-        // verify claim against a set of access rights and the issuer's pubkey & authentication nonce
-        // assert!(verify_proof(
-        //     &issuer_a.public,
-        //     &credential_proof_a,
-        //     &claimed_attributes_a,
-        //     Some(&NONCE)
-        // ));
-        // assert!(verify_proof(
-        //     &issuer_b.public,
-        //     &credential_proof_b,
-        //     &claimed_attributes_b,
-        //     Some(&NONCE)
-        // ));
+        println!("Claimed Attributes B: {:?}", claimed_attributes_b);
 
-        // let claims = AccessPolicy::parse("AGE::ADULT && LOC::INNER_CITY").unwrap();
+        // capability is granted to Bob based on the set of his access claims
+        let capability = access_control
+            .grant_capability(
+                &mut auth,
+                &vec![
+                    // Access Claim from Bob's credential whihc holds age & location attributes
+                    AccessClaim {
+                        issuer_id: issuer_a_id,
+                        cred_proof: credential_proof_a,
+                        attributes: claimed_attributes_a,
+                    },
+                    // Access Claim from Bob's credential which holds device attribute
+                    AccessClaim {
+                        issuer_id: issuer_b_id,
+                        cred_proof: credential_proof_b,
+                        attributes: claimed_attributes_b,
+                    },
+                ],
+                &NONCE,
+            )
+            .unwrap();
 
-        let access_claims: Vec<AccessClaim> = vec![
-            AccessClaim {
-                issuer_id: 1,
-                cred_proof: credential_proof_a,
-                attributes: claimed_attributes_a,
-            },
-            AccessClaim {
-                issuer_id: 2,
-                cred_proof: credential_proof_b,
-                attributes: claimed_attributes_b,
-            },
-        ];
+        // let capability = access_control
+        //     .grant_unsafe_capability(
+        //         &mut auth,
+        //         &AccessPolicy::parse("AGE::YOUTH && DEVICE::MOBILE && LOC::INNER_CITY").unwrap(),
+        //     )
+        //     .unwrap();
 
-        let capability =
-            access_control.grant_capability(&mut auth, &access_claims, &NONCE).unwrap();
-
+        // bob is able to access the hidden metadata using his capability token
         match enc_header
             .decrypt(&access_control, &capability, Some(&NONCE.to_be_bytes()))
             .unwrap()
@@ -284,6 +349,259 @@ mod test {
             None => {
                 panic!("Failed to decrypt metadata");
             },
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_access_denied_flow_a() -> Result<()> {
+        let access_control = AccessControl::default();
+        let (mut auth, _) = access_control.setup_capability_authority()?;
+
+        // Access-Credential A manages credentials that contains Age + Sex attributes
+        let mut access_structure_a = Age::access_structure().unwrap();
+        access_structure_a.extend(&Sex::access_structure().unwrap()).unwrap();
+
+        let issuer_a = Issuer::setup(None, &access_structure_a);
+        let (issuer_a_id, _) = access_control.register_issuer(&mut auth, &issuer_a.public)?;
+
+        // Access-Credential B manages credentials that contains Device & Location attributes
+        let mut access_structure_b = Location::access_structure().unwrap();
+        access_structure_b.extend(&Device::access_structure().unwrap()).unwrap();
+
+        let issuer_b = Issuer::setup(None, &access_structure_b);
+        let (issuer_b_id, apk) = access_control.register_issuer(&mut auth, &issuer_b.public)?;
+
+        // Alice creates encrypted header with Access Policy
+        // Access Policy permits only someone young living in West Sydney
+        let (secret, enc_header) = EncryptedHeader::generate(
+            &access_control,
+            &apk,
+            &AccessPolicy::parse("AGE::YOUTH && LOC::WEST_SYDNEY").unwrap(),
+            Some("alice_metadata".as_bytes()),
+            Some(&NONCE.to_be_bytes()),
+        )
+        .unwrap();
+
+        // Bob creates an alias
+        let mut bob = Alias::new();
+        bob = bob.randomize();
+
+        // and a proof of his alias using the verification nonce
+        let bob_proof = bob.alias_proof(&NONCE);
+
+        // Issuer A provides bob with age and location credential
+        let age_sex_cred = issuer_a
+            .access_credential()
+            .with_entry(Entry::new(&[Age::claim(25).qualify(), Sex::MALE.qualify()]))
+            .max_entries(&MaxEntries::default())
+            .issue_to(&bob_proof, Some(&NONCE))?;
+
+        // Issuer B provides bob with device credential
+        let device_location_cred = issuer_b
+            .access_credential()
+            .with_entry(Entry::new(&[
+                Device::claim(0).qualify(),
+                Location::claim("innercity".to_string()).qualify(),
+            ]))
+            .max_entries(&MaxEntries::default())
+            .issue_to(&bob_proof, Some(&NONCE))?;
+
+        // bob wants to claims access rights using his age & sex credential but without considering the sex attribute
+        let (credential_proof_a, claimed_attributes_a) = bob
+            .claim_builder(
+                &age_sex_cred,
+                vec![Entry::new(&[Age::claim(25).qualify(), Sex::MALE.qualify()])],
+            )
+            // Bob only selects his age attribute
+            .select_attribute(Age::claim(25).qualify())
+            .generate(&NONCE)
+            .map_err(|e| {
+                println!("Error generating credential proof: {}", e);
+                e
+            })?;
+
+        println!("Claimed Attributes A: {:?}", claimed_attributes_a);
+
+        // bob also wants to claim access rights using his device & location credential
+        let (credential_proof_b, claimed_attributes_b) = bob
+            .claim_builder(
+                &device_location_cred,
+                vec![Entry::new(&[
+                    Device::claim(0).qualify(),
+                    Location::claim("innercity".to_string()).qualify(),
+                ])],
+            )
+            .select_attribute(Device::claim(0).qualify())
+            .select_attribute(Location::claim("innercity".to_string()).qualify())
+            .generate(&NONCE)?;
+
+        println!("Claimed Attributes B: {:?}", claimed_attributes_b);
+
+        // capability is granted to Bob based on the set of his access claims
+        let capability = access_control
+            .grant_capability(
+                &mut auth,
+                &vec![
+                    // Access Claim from Bob's credential whihc holds age & location attributes
+                    AccessClaim {
+                        issuer_id: issuer_a_id,
+                        cred_proof: credential_proof_a,
+                        attributes: claimed_attributes_a,
+                    },
+                    // Access Claim from Bob's credential which holds device attribute
+                    AccessClaim {
+                        issuer_id: issuer_b_id,
+                        cred_proof: credential_proof_b,
+                        attributes: claimed_attributes_b,
+                    },
+                ],
+                &NONCE,
+            )
+            .unwrap();
+
+        // bob is unable to access the hidden metadata using his capability token
+        // since bob is an adult and lives in the inner city.
+        match enc_header
+            .decrypt(&access_control, &capability, Some(&NONCE.to_be_bytes()))
+            .unwrap()
+        {
+            Some(data) => {
+                println!("{data:#?}");
+
+                assert_eq!(data.secret, secret);
+                assert_eq!(data.metadata.unwrap(), "alice_metadata".as_bytes());
+                panic!("Should not be able to decrypt metadata");
+            },
+            None => println!("No data decrypted"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_access_denied_flow_b() -> Result<()> {
+        let access_control = AccessControl::default();
+        let (mut auth, _) = access_control.setup_capability_authority()?;
+
+        // Access-Credential A manages credentials that contains Age + Sex attributes
+        let mut access_structure_a = Age::access_structure().unwrap();
+        access_structure_a.extend(&Sex::access_structure().unwrap()).unwrap();
+
+        let issuer_a = Issuer::setup(None, &access_structure_a);
+        let (issuer_a_id, _) = access_control.register_issuer(&mut auth, &issuer_a.public)?;
+
+        // Access-Credential B manages credentials that contains Device & Location attributes
+        let mut access_structure_b = Location::access_structure().unwrap();
+        access_structure_b.extend(&Device::access_structure().unwrap()).unwrap();
+
+        let issuer_b = Issuer::setup(None, &access_structure_b);
+        let (issuer_b_id, apk) = access_control.register_issuer(&mut auth, &issuer_b.public)?;
+
+        // Alice creates encrypted header with Access Policy
+        // Access Policy permits only an Female Adult living in an Inner City or using a Mobile Device
+        let (secret, enc_header) = EncryptedHeader::generate(
+            &access_control,
+            &apk,
+            &AccessPolicy::parse(
+                "AGE::ADULT && SEX::FEMALE && (LOC::INNER_CITY || DEVICE::MOBILE)",
+            )
+            .unwrap(),
+            Some("alice_metadata".as_bytes()),
+            Some(&NONCE.to_be_bytes()),
+        )
+        .unwrap();
+
+        // Bob creates an alias
+        let mut bob = Alias::new();
+        bob = bob.randomize();
+
+        // and a proof of his alias using the verification nonce
+        let bob_proof = bob.alias_proof(&NONCE);
+
+        // Issuer A provides bob with age and location credential
+        let age_sex_cred = issuer_a
+            .access_credential()
+            .with_entry(Entry::new(&[Age::claim(25).qualify(), Sex::MALE.qualify()]))
+            .max_entries(&MaxEntries::default())
+            .issue_to(&bob_proof, Some(&NONCE))?;
+
+        // Issuer B provides bob with device credential
+        let device_location_cred = issuer_b
+            .access_credential()
+            .with_entry(Entry::new(&[
+                Device::claim(0).qualify(),
+                Location::claim("innercity".to_string()).qualify(),
+            ]))
+            .max_entries(&MaxEntries::default())
+            .issue_to(&bob_proof, Some(&NONCE))?;
+
+        // bob wants to claims access rights using his age & sex credential but without considering the sex attribute
+        let (credential_proof_a, claimed_attributes_a) = bob
+            .claim_builder(
+                &age_sex_cred,
+                vec![Entry::new(&[Age::claim(25).qualify(), Sex::MALE.qualify()])],
+            )
+            // Bob only selects his age attribute
+            .select_attribute(Age::claim(25).qualify())
+            .generate(&NONCE)
+            .map_err(|e| {
+                println!("Error generating credential proof: {}", e);
+                e
+            })?;
+
+        println!("Claimed Attributes A: {:?}", claimed_attributes_a);
+
+        // bob also wants to claim access rights using his device & location credential
+        let (credential_proof_b, claimed_attributes_b) = bob
+            .claim_builder(
+                &device_location_cred,
+                vec![Entry::new(&[
+                    Device::claim(0).qualify(),
+                    Location::claim("innercity".to_string()).qualify(),
+                ])],
+            )
+            .select_attribute(Device::claim(0).qualify())
+            .select_attribute(Location::claim("innercity".to_string()).qualify())
+            .generate(&NONCE)?;
+
+        println!("Claimed Attributes B: {:?}", claimed_attributes_b);
+
+        // capability is granted to Bob based on the set of his access claims
+        let capability = access_control
+            .grant_capability(
+                &mut auth,
+                &vec![
+                    // Access Claim from Bob's credential whihc holds age & location attributes
+                    AccessClaim {
+                        issuer_id: issuer_a_id,
+                        cred_proof: credential_proof_a,
+                        attributes: claimed_attributes_a,
+                    },
+                    // Access Claim from Bob's credential which holds device attribute
+                    AccessClaim {
+                        issuer_id: issuer_b_id,
+                        cred_proof: credential_proof_b,
+                        attributes: claimed_attributes_b,
+                    },
+                ],
+                &NONCE,
+            )
+            .unwrap();
+
+        // bob is unable to access the hidden metadata using his capability token
+        // since bob chose to omit his Sex attribute
+        match enc_header
+            .decrypt(&access_control, &capability, Some(&NONCE.to_be_bytes()))
+            .unwrap()
+        {
+            Some(data) => {
+                println!("{data:#?}");
+
+                assert_eq!(data.secret, secret);
+                assert_eq!(data.metadata.unwrap(), "alice_metadata".as_bytes());
+                panic!("Should not be able to decrypt metadata");
+            },
+            None => println!("No data decrypted"),
         }
         Ok(())
     }

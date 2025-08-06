@@ -24,10 +24,7 @@ impl AccessCapabilityToken {
         self.ps.iter().map(|Pi| Pi * r).collect()
     }
 
-    fn public_key(
-        &self,
-        traps: &Vec<<ElGamal as Nike>::PublicKey>,
-    ) -> <ElGamal as Nike>::PublicKey {
+    fn tk(&self, traps: &Vec<<ElGamal as Nike>::PublicKey>) -> <ElGamal as Nike>::PublicKey {
         self.id.iter().zip(traps.iter()).map(|(marker, trap)| trap * marker).sum()
     }
 
@@ -36,7 +33,7 @@ impl AccessCapabilityToken {
         rng: &mut impl CryptoRngCore,
         cap: &XEnc,
     ) -> Result<Option<Secret<SHARED_SECRET_LENGTH>>, Error> {
-        let pk = self.public_key(&cap.c);
+        let tk = self.tk(&cap.c);
 
         let T = {
             let mut hasher = Sha3::v256();
@@ -69,7 +66,7 @@ impl AccessCapabilityToken {
             shuffle(&mut revision, rng);
             for (E, F) in &encs {
                 for (_, secret) in &revision {
-                    let (mut K1, K2) = secret.session_keys(&pk, E)?;
+                    let (mut K1, K2) = secret.session_keys(&tk, E)?;
                     let S_ij = xor_in_place(H_hash(&K1, Some(&K2), &T)?, F);
                     let (tag_ij, ss) = J_hash(&S_ij, &U);
                     if &cap.tag == &tag_ij {

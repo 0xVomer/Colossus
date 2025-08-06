@@ -54,10 +54,8 @@ impl AccessStructure {
 
     pub fn extend(&mut self, other: &AccessStructure) -> Result<(), Error> {
         let mut cnt = self.dimensions.values().map(Dimension::nb_attributes).sum::<usize>();
-
         for (dimension, dim) in other.dimensions.iter() {
             if !self.dimensions.contains_key(dimension) {
-                // if doesn't, add either hierarchy or anarchy
                 let new_dim = match dim {
                     Dimension::Hierarchy(_) => {
                         self.add_hierarchy(dimension.clone()).unwrap();
@@ -87,7 +85,6 @@ impl AccessStructure {
                 }
             }
         }
-
         Ok(())
     }
 
