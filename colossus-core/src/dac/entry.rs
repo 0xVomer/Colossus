@@ -1,52 +1,59 @@
-use super::{Attribute, DEFAULT_MAX_ENTRIES};
+use super::DEFAULT_MAX_ENTRIES;
 use bls12_381_plus::{Scalar, elliptic_curve::bigint};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Entry(pub Vec<Attribute>);
+pub trait Attribute: Clone {
+    fn digest(&self) -> &[u8];
+}
 
-impl Entry {
-    pub fn new(attributes: &[Attribute]) -> Self {
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Entry<A: Attribute>(pub Vec<A>);
+
+impl<A: Attribute> Entry<A> {
+    pub fn new(attributes: &[A]) -> Self {
         Entry(attributes.to_vec())
+    }
+    pub fn attributes(&'_ self) -> impl '_ + Iterator<Item = A> {
+        self.0.iter().cloned()
     }
 }
 
-impl Deref for Entry {
-    type Target = Vec<Attribute>;
+impl<A: Attribute> Deref for Entry<A> {
+    type Target = Vec<A>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl IntoIterator for Entry {
-    type Item = Attribute;
-    type IntoIter = ::std::vec::IntoIter<Attribute>;
+impl<A: Attribute> IntoIterator for Entry<A> {
+    type Item = A;
+    type IntoIter = ::std::vec::IntoIter<A>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
 }
 
-impl std::iter::FromIterator<Attribute> for Entry {
-    fn from_iter<I: IntoIterator<Item = Attribute>>(iter: I) -> Self {
+impl<A: Attribute> std::iter::FromIterator<A> for Entry<A> {
+    fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
         Entry(iter.into_iter().collect())
     }
 }
 
-impl From<Vec<Attribute>> for Entry {
-    fn from(item: Vec<Attribute>) -> Self {
+impl<A: Attribute> From<Vec<A>> for Entry<A> {
+    fn from(item: Vec<A>) -> Self {
         Entry(item)
     }
 }
 
-impl From<&[Attribute]> for Entry {
-    fn from(item: &[Attribute]) -> Self {
+impl<A: Attribute> From<&[A]> for Entry<A> {
+    fn from(item: &[A]) -> Self {
         Entry(item.to_vec())
     }
 }
 
-pub fn entry_to_scalar(input: &Entry) -> Vec<Scalar> {
+pub fn entry_to_scalar<A: Attribute>(input: &Entry<A>) -> Vec<Scalar> {
     input
         .iter()
         .map(|attr| bigint::U256::from_be_slice(attr.digest()).into())
@@ -108,16 +115,17 @@ impl std::cmp::PartialEq<MaxEntries> for usize {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::policy::QualifiedAttribute;
 
     #[test]
     fn test_entry() {
-        let entry = Entry(vec![]);
+        let entry = Entry::<QualifiedAttribute>(vec![]);
         assert!(entry.is_empty());
     }
 
     #[test]
     fn test_convert_entry_to_big() {
-        let entry = Entry::new(&[Attribute::from(("DPT", "FIN"))]);
+        let entry = Entry::<QualifiedAttribute>::new(&[QualifiedAttribute::from(("DPT", "FIN"))]);
         let scalars = entry_to_scalar(&entry);
         assert_eq!(scalars.len(), 1);
     }

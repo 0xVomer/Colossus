@@ -1,8 +1,6 @@
-use super::{
-    CBORCodec, CredProof, Credential, Entry, Initial, Offer, Randomized, Signature, verify,
-};
+use super::{AccessCredential, Attributes, CBORCodec, CredProof, Initial, Randomized, Signature};
 use crate::dac::{
-    builder::{OfferBuilder, ProofBuilder},
+    builder::ClaimBuilder,
     ec::Scalar,
     keys::VK,
     set_commits::{Commitment, CrossSetCommitment},
@@ -136,32 +134,24 @@ impl<Stage> Alias<Stage> {
         Alias::new_from_secret(secret_wit)
     }
 
-    pub fn offer_builder<'a>(
+    pub fn claim_builder<'a>(
         &'a self,
-        cred: &'a Credential,
-        entries: &[Entry],
-    ) -> OfferBuilder<'a, Stage> {
-        OfferBuilder::new(self, cred, entries)
-    }
-
-    pub fn proof_builder<'a>(
-        &'a self,
-        cred: &'a Credential,
-        entries: &'a [Entry],
-    ) -> ProofBuilder<'a, Stage> {
-        ProofBuilder::new(self, cred, entries)
+        cred: &'a AccessCredential,
+        all_attributes: Vec<Attributes>,
+    ) -> ClaimBuilder<'a, Stage> {
+        ClaimBuilder::new(self, cred, all_attributes)
     }
 
     pub fn extend(
         &self,
-        cred: &Credential,
-        addl_attrs: &Entry,
-    ) -> Result<Credential, crate::dac::error::Error> {
+        cred: &AccessCredential,
+        addl_attribs: &Attributes,
+    ) -> Result<AccessCredential, crate::dac::error::Error> {
         let mu = Scalar::ONE;
 
         let cred = super::spseq_uc::change_rel(
             &cred.issuer_public.parameters,
-            addl_attrs,
+            addl_attribs,
             cred.clone(),
             &mu,
         )
@@ -173,71 +163,6 @@ impl<Stage> Alias<Stage> {
         })?;
 
         Ok(cred)
-    }
-
-    pub fn offer(
-        &self,
-        cred: &Credential,
-        addl_attrs: &Option<Entry>,
-    ) -> Result<Offer, crate::dac::error::Error> {
-        let rng = CsRng::from_entropy();
-
-        let mu = Scalar::ONE;
-        let psi = Scalar::random(rng);
-
-        let (alias_p_pk, cred_prime, chi) =
-            super::spseq_uc::change_rep(&self.public.key, cred, &mu, &psi, true);
-
-        let alias = Alias::from_components(&self.secret, Chi(chi), Psi(psi));
-
-        let mut cred_prime = cred_prime;
-        if let Some(addl_attrs) = addl_attrs {
-            cred_prime = match super::spseq_uc::change_rel(
-                &cred.issuer_public.parameters,
-                addl_attrs,
-                cred_prime.clone(),
-                &mu,
-            ) {
-                Ok(cred_pushed) => cred_pushed,
-                Err(e) => {
-                    return Err(crate::dac::error::Error::ChangeRelationsFailed(format!(
-                        "Change Relations Failed: {}",
-                        e
-                    )));
-                },
-            };
-        }
-
-        if !verify(
-            &cred_prime.issuer_public.vk,
-            &alias_p_pk,
-            &cred_prime.commitment_vector,
-            &cred_prime.sigma,
-        ) {
-            return Err(crate::dac::error::Error::InvalidSignature(
-                "Credential Signature is not valid for the new Alias".into(),
-            ));
-        }
-
-        let orphan = alias.send_convert_sig(&cred_prime.issuer_public.vk, cred_prime.sigma.clone());
-
-        Ok(Offer(Credential { sigma: orphan, ..cred_prime }))
-    }
-
-    pub fn accept(
-        &self,
-        offer: &Offer, // credential got from delegator
-    ) -> Result<Credential, crate::dac::error::Error> {
-        let sigma_new = self.receive_cred(&offer.issuer_public.vk, offer.sigma.clone())?;
-
-        if !verify(&offer.issuer_public.vk, &self.public.key, &offer.commitment_vector, &sigma_new)
-        {
-            return Err(crate::dac::error::Error::AcceptOfferFailed(String::from(
-                "Invalid Signature",
-            )));
-        }
-
-        Ok(Credential { sigma: sigma_new, ..offer.clone().into() })
     }
 
     fn receive_cred(
@@ -259,9 +184,9 @@ impl<Stage> Alias<Stage> {
 
     pub fn prove(
         &self,
-        cred: &Credential,
-        all_attributes: &[Entry],
-        selected_attrs: &[Entry],
+        cred: &AccessCredential,
+        all_attributes: &[Attributes],
+        selected_attributes: &[Attributes],
         nonce: &Nonce,
     ) -> CredProof {
         let rng = CsRng::from_entropy();
@@ -274,7 +199,7 @@ impl<Stage> Alias<Stage> {
 
         let alias: Alias<Randomized> = Alias::from_components(&self.secret, Chi(chi), Psi(psi));
 
-        let (witness_vector, commit_vector) = selected_attrs
+        let (witness_vector, commit_vector) = selected_attributes
             .iter()
             .enumerate()
             .filter(|(_, selected_attr)| !selected_attr.is_empty())

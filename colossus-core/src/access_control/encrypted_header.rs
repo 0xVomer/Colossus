@@ -52,10 +52,10 @@ impl EncryptedHeader {
     pub fn decrypt(
         &self,
         api: &AccessControl,
-        usk: &AccessCapabilityToken,
+        cap_token: &AccessCapabilityToken,
         authentication_data: Option<&[u8]>,
     ) -> Result<Option<CleartextHeader>, Error> {
-        api.decaps(usk, &self.encapsulation)?
+        api.decaps(cap_token, &self.encapsulation)?
             .map(|seed| {
                 let metadata = self
                     .encrypted_metadata
@@ -158,7 +158,7 @@ mod serialization {
         let (mut msk, mpk) = gen_auth(&api, false).unwrap();
 
         let ap = AccessPolicy::parse("(DPT::MKG || DPT::FIN) && SEC::TOP").unwrap();
-        let usk = api.grant_capability(&mut msk, &ap).unwrap();
+        let usk = api.grant_unsafe_capability(&mut msk, &ap).unwrap();
 
         let test_encrypted_header = |ap, metadata, authentication_data| {
             let (secret, encrypted_header) =

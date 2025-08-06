@@ -4,7 +4,7 @@ use super::{
         curve::{Gt, pairing, polynomial_from_roots},
         univarpoly::UnivarPolynomial,
     },
-    entry::{Entry, entry_to_scalar},
+    entry::{Attribute, Entry, entry_to_scalar},
     error,
     keypair::MaxCardinality,
 };
@@ -134,7 +134,10 @@ pub trait Commitment {
     #[allow(dead_code)]
     fn public_parameters(self) -> ParamSetCommitment;
 
-    fn commit_set(param_sc: &ParamSetCommitment, mess_set_str: &Entry) -> (G1Projective, Scalar) {
+    fn commit_set<A: Attribute>(
+        param_sc: &ParamSetCommitment,
+        mess_set_str: &Entry<A>,
+    ) -> (G1Projective, Scalar) {
         let mess_set: Vec<Scalar> = entry_to_scalar(mess_set_str);
         let monypol_coeff = polynomial_from_roots(&mess_set);
         let pre_commit = generate_pre_commit(monypol_coeff, param_sc);
@@ -146,11 +149,11 @@ pub trait Commitment {
     }
 
     #[allow(dead_code)]
-    fn open_set(
+    fn open_set<A: Attribute>(
         param_sc: &ParamSetCommitment,
         commitment: &G1Projective,
         open_info: &Scalar,
-        mess_set_str: &Entry,
+        mess_set_str: &Entry<A>,
     ) -> bool {
         let mess_set: Vec<Scalar> = entry_to_scalar(mess_set_str);
         let monypol_coeff = polynomial_from_roots(&mess_set);
@@ -161,11 +164,11 @@ pub trait Commitment {
         *commitment == commitment_check
     }
 
-    fn open_subset(
+    fn open_subset<A: Attribute>(
         param_sc: &ParamSetCommitment,
-        all_messages: &Entry,
+        all_messages: &Entry<A>,
         open_info: &Scalar,
-        subset: &Entry,
+        subset: &Entry<A>,
     ) -> Option<G1Projective> {
         if open_info.is_zero().into() {
             return None;
@@ -195,10 +198,10 @@ pub trait Commitment {
     }
 
     #[allow(dead_code)]
-    fn verify_subset(
+    fn verify_subset<A: Attribute>(
         param_sc: &ParamSetCommitment,
         commitment: &G1Projective,
-        subset_str: &Entry,
+        subset_str: &Entry<A>,
         witness: &G1Projective,
     ) -> bool {
         let mess_subset_t: Vec<Scalar> = entry_to_scalar(subset_str);
@@ -260,10 +263,10 @@ impl CrossSetCommitment {
         )
     }
 
-    pub fn verify_cross(
+    pub fn verify_cross<A: Attribute>(
         param_sc: &ParamSetCommitment,
         commit_vector: &[G1Projective],
-        selected_entry_subset_vector: &[Entry],
+        selected_entry_subset_vector: &[Entry<A>],
         proof: &G1Projective,
     ) -> bool {
         let subsets_vector: Vec<Vec<Scalar>> = selected_entry_subset_vector
@@ -362,7 +365,8 @@ pub fn not_intersection(list_s: &[Scalar], list_t: Vec<Scalar>) -> Vec<Scalar> {
 
 #[cfg(test)]
 mod test {
-    use crate::dac::Attribute;
+    use crate::dac::Attributes;
+    use crate::policy::QualifiedAttribute;
 
     use super::*;
 
@@ -370,10 +374,10 @@ mod test {
     fn test_commit_and_open() {
         let max_cardinal = 5;
 
-        let attrib_set: Entry = Entry(vec![
-            Attribute::from(("Age", "Over18")),
-            Attribute::from(("Sex", "female")),
-            Attribute::from(("License", "Driver")),
+        let attrib_set: Attributes = Entry(vec![
+            QualifiedAttribute::from(("Age", "Over18")),
+            QualifiedAttribute::from(("Sex", "female")),
+            QualifiedAttribute::from(("License", "Driver")),
         ]);
 
         let sc = SetCommitment::new(MaxCardinality(max_cardinal));
@@ -386,13 +390,15 @@ mod test {
     fn test_open_verify_subset() {
         let max_cardinal = 5;
 
-        let attrib_set: Entry = Entry(vec![
-            Attribute::from(("Age", "Over18")),
-            Attribute::from(("Sex", "female")),
-            Attribute::from(("License", "Driver")),
+        let attrib_set: Attributes = Entry(vec![
+            QualifiedAttribute::from(("Age", "Over18")),
+            QualifiedAttribute::from(("Sex", "female")),
+            QualifiedAttribute::from(("License", "Driver")),
         ]);
-        let attrib_subset =
-            Entry(vec![Attribute::from(("Age", "Over18")), Attribute::from(("License", "Driver"))]);
+        let attrib_subset = Entry(vec![
+            QualifiedAttribute::from(("Age", "Over18")),
+            QualifiedAttribute::from(("License", "Driver")),
+        ]);
 
         let sc = SetCommitment::new(MaxCardinality(max_cardinal));
         let (commitment, opening_info) = SetCommitment::commit_set(&sc.param_sc, &attrib_set);
@@ -413,16 +419,16 @@ mod test {
 
     #[test]
     fn test_aggregate_verify_cross() {
-        let attrib_set_a: Entry = Entry(vec![
-            Attribute::from(("AGE", "OVER18")),
-            Attribute::from(("GENDER", "FEM")),
-            Attribute::from(("LICENSE", "DRIVER")),
+        let attrib_set_a: Attributes = Entry(vec![
+            QualifiedAttribute::from(("AGE", "OVER18")),
+            QualifiedAttribute::from(("GENDER", "FEM")),
+            QualifiedAttribute::from(("LICENSE", "DRIVER")),
         ]);
 
-        let attrib_set_b: Entry = Entry(vec![
-            Attribute::from(("DRIVER", "TYPEB")),
-            Attribute::from(("COMPANY", "ACME")),
-            Attribute::from(("ROLE", "DELIVERY")),
+        let attrib_set_b: Attributes = Entry(vec![
+            QualifiedAttribute::from(("DRIVER", "TYPEB")),
+            QualifiedAttribute::from(("COMPANY", "ACME")),
+            QualifiedAttribute::from(("ROLE", "DELIVERY")),
         ]);
 
         let max_cardinal = 5;
@@ -436,12 +442,14 @@ mod test {
         let commit_vector = &vec![commitment_1, commitment_2];
 
         let attrib_subset_1 = Entry(vec![
-            Attribute::from(("AGE", "OVER18")),
-            Attribute::from(("GENDER", "FEM")),
-            Attribute::from(("LICENSE", "DRIVER")),
+            QualifiedAttribute::from(("AGE", "OVER18")),
+            QualifiedAttribute::from(("GENDER", "FEM")),
+            QualifiedAttribute::from(("LICENSE", "DRIVER")),
         ]);
-        let attrib_subset_2 =
-            Entry(vec![Attribute::from(("DRIVER", "TYPEB")), Attribute::from(("COMPANY", "ACME"))]);
+        let attrib_subset_2 = Entry(vec![
+            QualifiedAttribute::from(("DRIVER", "TYPEB")),
+            QualifiedAttribute::from(("COMPANY", "ACME")),
+        ]);
 
         let witness_1 = CrossSetCommitment::open_subset(
             &csc.param_sc,

@@ -8,13 +8,14 @@ use crate::{
         MIN_TRACING_LEVEL, SHARED_SECRET_LENGTH, XEnc,
         traits::{AE, KemAc, PkeAc},
     },
+    dac::{keypair::IssuerPublic, zkp::Nonce},
     policy::{AccessPolicy, Error},
 };
 pub use capability::{
-    AccessCapabilityId, AccessCapabilityToken, AccessRightPublicKey, AccessRightSecretKey,
-    CapabilityAuthority, CapabilityAuthorityPublicKey, TracingPublicKey, create_capability_token,
-    prune_capability_authority, refresh_capability_authority, refresh_capability_token,
-    update_capability_authority,
+    AccessCapabilityId, AccessCapabilityToken, AccessClaim, AccessRightPublicKey,
+    AccessRightSecretKey, CapabilityAuthority, CapabilityAuthorityPublicKey, TracingPublicKey,
+    create_capability_token, create_unsafe_capability_token, prune_capability_authority,
+    refresh_capability_authority, refresh_capability_token, update_capability_authority,
 };
 use cosmian_crypto_core::{CsRng, Secret, SymmetricKey, reexport::rand_core::SeedableRng};
 pub use encrypted_header::EncryptedHeader;
@@ -67,9 +68,20 @@ impl AccessControl {
         refresh_capability_authority(
             &mut *self.rng.lock().expect("Mutex lock failed!"),
             auth,
-            auth.access_structure.ap_to_usk_rights(ap)?,
+            auth.access_structure.ap_to_access_rights(ap)?,
         )?;
         auth.rpk()
+    }
+
+    pub fn register_issuer(
+        &self,
+        auth: &mut CapabilityAuthority,
+        issuer: &IssuerPublic,
+    ) -> Result<(usize, CapabilityAuthorityPublicKey), Error> {
+        let id =
+            auth.register_issuer(issuer, &mut *self.rng.lock().expect("Mutex lock failed!"))?;
+        let rpk = auth.rpk()?;
+        Ok((id, rpk))
     }
 
     pub fn prune_capability_authority(
@@ -77,21 +89,36 @@ impl AccessControl {
         auth: &mut CapabilityAuthority,
         ap: &AccessPolicy,
     ) -> Result<CapabilityAuthorityPublicKey, Error> {
-        prune_capability_authority(auth, &auth.access_structure.ap_to_usk_rights(ap)?);
+        prune_capability_authority(auth, &auth.access_structure.ap_to_access_rights(ap)?);
         auth.rpk()
+    }
+
+    pub fn grant_unsafe_capability(
+        &self,
+        auth: &mut CapabilityAuthority,
+        ap: &AccessPolicy,
+    ) -> Result<AccessCapabilityToken, Error> {
+        create_unsafe_capability_token(
+            &mut *self.rng.lock().expect("Mutex lock failed!"),
+            auth,
+            auth.access_structure.ap_to_access_rights(ap)?,
+        )
     }
 
     pub fn grant_capability(
         &self,
         auth: &mut CapabilityAuthority,
-        ap: &AccessPolicy,
+        claims: &[AccessClaim],
+        nonce: &Nonce,
     ) -> Result<AccessCapabilityToken, Error> {
         create_capability_token(
             &mut *self.rng.lock().expect("Mutex lock failed!"),
             auth,
-            auth.access_structure.ap_to_usk_rights(ap)?,
+            claims,
+            nonce,
         )
     }
+
     pub fn refresh_capability(
         &self,
         auth: &mut CapabilityAuthority,

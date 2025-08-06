@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub type UpdateKey = Option<Vec<Vec<G1Projective>>>;
 
 #[derive(Clone, Debug, PartialEq, Default)]
-pub struct Credential {
+pub struct AccessCredential {
     pub sigma: Signature,
     pub update_key: UpdateKey, // Called DelegatableKey (dk for k prime) in the paper
     pub commitment_vector: Vec<G1Projective>,
@@ -14,7 +14,7 @@ pub struct Credential {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CredentialCompressed {
+pub struct AccessCredentialCompressed {
     pub sigma: SignatureCompressed,
     pub update_key: Option<Vec<Vec<Vec<u8>>>>,
     pub commitment_vector: Vec<Vec<u8>>,
@@ -22,11 +22,11 @@ pub struct CredentialCompressed {
     pub issuer_public: IssuerPublicCompressed,
 }
 
-impl CBORCodec for CredentialCompressed {}
+impl CBORCodec for AccessCredentialCompressed {}
 
-impl TryFrom<CredentialCompressed> for Credential {
+impl TryFrom<AccessCredentialCompressed> for AccessCredential {
     type Error = crate::dac::error::Error;
-    fn try_from(value: CredentialCompressed) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: AccessCredentialCompressed) -> std::result::Result<Self, Self::Error> {
         let sigma = Signature::try_from(value.sigma)?;
         let update_key = match value.update_key {
             Some(usign) => {
@@ -82,7 +82,7 @@ impl TryFrom<CredentialCompressed> for Credential {
 
         let issuer_public = IssuerPublic::try_from(value.issuer_public)?;
 
-        Ok(Credential {
+        Ok(AccessCredential {
             sigma,
             update_key,
             commitment_vector,
@@ -92,8 +92,8 @@ impl TryFrom<CredentialCompressed> for Credential {
     }
 }
 
-impl From<&Credential> for CredentialCompressed {
-    fn from(cred: &Credential) -> Self {
+impl From<&AccessCredential> for AccessCredentialCompressed {
+    fn from(cred: &AccessCredential) -> Self {
         let sigma = SignatureCompressed::from(cred.sigma.clone());
         let issuer_public = IssuerPublicCompressed::from(cred.issuer_public.clone());
 
@@ -123,7 +123,7 @@ impl From<&Credential> for CredentialCompressed {
             .map(|item| OpeningInfo::new(item).inner.to_vec())
             .collect::<Vec<Vec<u8>>>();
 
-        CredentialCompressed {
+        AccessCredentialCompressed {
             sigma,
             update_key,
             commitment_vector,
@@ -133,8 +133,8 @@ impl From<&Credential> for CredentialCompressed {
     }
 }
 
-impl From<Credential> for CredentialCompressed {
-    fn from(cred: Credential) -> Self {
+impl From<AccessCredential> for AccessCredentialCompressed {
+    fn from(cred: AccessCredential) -> Self {
         let sigma = SignatureCompressed::from(cred.sigma);
         let update_key = match cred.update_key {
             Some(usign) => {
@@ -162,7 +162,7 @@ impl From<Credential> for CredentialCompressed {
 
         let issuer_public: IssuerPublicCompressed = cred.issuer_public.into();
 
-        CredentialCompressed {
+        AccessCredentialCompressed {
             sigma,
             update_key,
             commitment_vector,
@@ -200,30 +200,30 @@ impl From<Vec<u8>> for OpeningInfo {
     }
 }
 
-impl Display for Credential {
+impl Display for AccessCredential {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let comp = CredentialCompressed::from(self);
+        let comp = AccessCredentialCompressed::from(self);
         let comp_json = serde_json::to_string_pretty(&comp).unwrap();
         write!(f, "{}", comp_json)
     }
 }
 
-impl TryFrom<String> for Credential {
+impl TryFrom<String> for AccessCredential {
     type Error = crate::dac::error::Error;
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        let cred_compressed: CredentialCompressed = serde_json::from_str(&s)?;
+        let cred_compressed: AccessCredentialCompressed = serde_json::from_str(&s)?;
         cred_compressed.try_into()
     }
 }
 
 pub fn change_rep(
     pk_u: &G1Projective,
-    cred: &Credential,
+    cred: &AccessCredential,
     mu: &Scalar,
     psi: &Scalar,
     extendable: bool,
-) -> (G1Projective, Credential, Scalar) {
+) -> (G1Projective, AccessCredential, Scalar) {
     let rng = CsRng::from_entropy();
 
     let chi = Scalar::random(rng);
@@ -258,7 +258,7 @@ pub fn change_rep(
 
         (
             rndmz_pk_u,
-            Credential {
+            AccessCredential {
                 sigma: sigma_prime,
                 update_key: fresh_update_key,
                 commitment_vector: rndmz_commit_vector,
@@ -274,21 +274,22 @@ pub fn change_rep(
 
 pub fn change_rel(
     parameters: &ParamSetCommitment,
-    addl_attrs: &Entry,
-    orig_sig: Credential,
+    addl_attribs: &Attributes,
+    orig_sig: AccessCredential,
     mu: &Scalar,
-) -> Result<Credential, super::error::UpdateError> {
+) -> Result<AccessCredential, super::error::UpdateError> {
     let index_l = orig_sig.commitment_vector.len();
 
     match &orig_sig.update_key {
         Some(usign) if index_l < usign.len() => {
             let Signature { z, y_g1, y_hat, t } = orig_sig.sigma;
-            let (commitment_l, opening_l) = CrossSetCommitment::commit_set(parameters, addl_attrs);
+            let (commitment_l, opening_l) =
+                CrossSetCommitment::commit_set(parameters, addl_attribs);
 
             let rndmz_commitment_l = mu * commitment_l;
             let rndmz_opening_l = mu * opening_l;
 
-            let set_l = entry_to_scalar(addl_attrs);
+            let set_l = entry_to_scalar(addl_attribs);
             let monypolcoefficient = polynomial_from_roots(&set_l[..]);
 
             let list = usign.get(index_l).unwrap();
@@ -311,7 +312,7 @@ pub fn change_rel(
             let mut opening_vector_tilde = orig_sig.opening_vector;
             opening_vector_tilde.push(rndmz_opening_l);
 
-            Ok(Credential {
+            Ok(AccessCredential {
                 sigma: sigma_tilde,
                 commitment_vector: commitment_vector_tilde,
                 opening_vector: opening_vector_tilde,
@@ -325,9 +326,11 @@ pub fn change_rel(
 }
 
 pub mod fixtures {
-    use super::*;
 
-    pub fn make_test_credential() -> Credential {
+    use super::*;
+    use crate::policy::AccessStructure;
+
+    pub fn make_test_credential() -> AccessCredential {
         let rng = CsRng::from_entropy();
 
         let sigma = Signature {
@@ -341,12 +344,13 @@ pub mod fixtures {
         let opening_vector = vec![Scalar::random(&mut rng.clone())];
         let issuer_public = IssuerPublic {
             vk: vec![VK::G1(G1Projective::random(&mut rng.clone()))],
+            access_structure: AccessStructure::new(),
             parameters: ParamSetCommitment {
                 pp_commit_g1: vec![G1Projective::random(&mut rng.clone())],
                 pp_commit_g2: vec![G2Projective::random(&mut rng.clone())],
             },
         };
-        Credential {
+        AccessCredential {
             sigma,
             update_key,
             commitment_vector,
@@ -365,8 +369,8 @@ mod test {
     #[test]
     fn test_credential_compressed_uncompress_roundtrip() {
         let cred = make_test_credential();
-        let cred_compressed = CredentialCompressed::from(&cred);
-        let cred_uncompressed = Credential::try_from(cred_compressed).unwrap();
+        let cred_compressed = AccessCredentialCompressed::from(&cred);
+        let cred_uncompressed = AccessCredential::try_from(cred_compressed).unwrap();
         assert_eq!(cred, cred_uncompressed);
     }
 }

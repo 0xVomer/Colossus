@@ -69,7 +69,7 @@ impl QualifiedAttribute {
         self.cid.hash()
     }
 
-    pub fn digest(&self) -> &[u8] {
+    pub fn hash_digest(&self) -> &[u8] {
         self.cid.hash().digest()
     }
 

@@ -8,7 +8,7 @@ use std::{
     fmt::Debug,
 };
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct AccessStructure {
     dimensions: HashMap<String, super::Dimension>,
 }
@@ -26,12 +26,66 @@ impl AccessStructure {
 }
 
 impl AccessStructure {
-    pub fn ap_to_usk_rights(&self, ap: &AccessPolicy) -> Result<HashSet<Right>, Error> {
+    // Get the access rights associated with the given qualified attributes
+    pub fn get_access_rights(
+        &self,
+        attributes: &[QualifiedAttribute],
+    ) -> Result<HashSet<Right>, Error> {
+        let points = vec![attributes.to_vec()]
+            .iter()
+            .map(|qas| self.generate_complementary_points(qas))
+            .try_fold(HashSet::new(), |mut acc, ids| {
+                ids?.into_iter().for_each(|ids| {
+                    acc.insert(ids);
+                });
+                Ok::<HashSet<Vec<usize>>, Error>(acc)
+            })?;
+
+        points.into_iter().map(Right::from_point).collect()
+    }
+
+    pub fn ap_to_access_rights(&self, ap: &AccessPolicy) -> Result<HashSet<Right>, Error> {
         self.generate_complementary_rights(ap)
     }
 
     pub fn ap_to_enc_rights(&self, ap: &AccessPolicy) -> Result<HashSet<Right>, Error> {
         self.generate_associated_rights(ap)
+    }
+
+    pub fn extend(&mut self, other: &AccessStructure) -> Result<(), Error> {
+        let mut cnt = self.dimensions.values().map(Dimension::nb_attributes).sum::<usize>();
+        for (dimension, dim) in other.dimensions.iter() {
+            if !self.dimensions.contains_key(dimension) {
+                let new_dim = match dim {
+                    Dimension::Hierarchy(_) => {
+                        self.add_hierarchy(dimension.clone()).unwrap();
+
+                        self.dimensions
+                            .get_mut(dimension)
+                            .ok_or_else(|| Error::DimensionNotFound(dimension.clone()))
+                            .unwrap()
+                    },
+                    Dimension::Anarchy(_) => {
+                        self.add_anarchy(dimension.clone()).unwrap();
+
+                        self.dimensions
+                            .get_mut(dimension)
+                            .ok_or_else(|| Error::DimensionNotFound(dimension.clone()))
+                            .unwrap()
+                    },
+                };
+
+                let init_id = dim.get_attribute_id(0).unwrap();
+                new_dim.add_attribute(init_id.clone(), None, cnt).unwrap();
+                cnt += 1;
+
+                for (prev, curr) in dim.get_attribute_pairs() {
+                    new_dim.add_attribute(curr.clone(), Some(prev.clone()), cnt).unwrap();
+                    cnt += 1;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn add_anarchy(&mut self, dimension: String) -> Result<(), Error> {
@@ -102,11 +156,24 @@ impl AccessStructure {
         self.dimensions.keys().map(|d| d.as_str())
     }
 
+    pub fn has_dimension(&self, dimension: String) -> bool {
+        self.dimensions.contains_key(&dimension)
+    }
+
+    pub fn no_attributes(&'_ self) -> usize {
+        self.dimensions.values().map(|d| d.nb_attributes()).sum()
+    }
+
     pub fn attributes(&'_ self) -> impl '_ + Iterator<Item = QualifiedAttribute> {
         self.dimensions.iter().flat_map(|(dimension, d)| {
-            d.get_attributes_name()
+            d.get_attribute_ids()
                 .map(move |attr| QualifiedAttribute::from((dimension.as_str(), attr)))
         })
+    }
+
+    pub fn contains_attribute(&self, attribute_id: ATTRIBUTE) -> bool {
+        // iterate through each dimension and check if attribute_id entry exists
+        self.dimensions.values().any(|d| d.has_attribute(&attribute_id))
     }
 
     pub fn disable_attribute(&mut self, attr: &QualifiedAttribute) -> Result<(), Error> {
@@ -296,6 +363,52 @@ mod serialization {
 mod tests {
     use super::*;
     use crate::policy::*;
+
+    #[test]
+    fn test_extend() {
+        let mut structure_a = AccessStructure::new();
+        let attribute_a = crate::policy::QualifiedAttribute::from(("STRUCT_A", "A"));
+
+        structure_a.add_anarchy("STRUCT_A".to_string()).unwrap();
+        structure_a.add_attribute(attribute_a.clone(), None).unwrap();
+
+        let mut structure_b = AccessStructure::new();
+        let attribute_b = crate::policy::QualifiedAttribute::from(("STRUCT_B", "B"));
+
+        structure_b.add_anarchy("STRUCT_B".to_string()).unwrap();
+        structure_b.add_attribute(attribute_b.clone(), None).unwrap();
+
+        // struct_a should not contain dimension STRUCT_B & Attribute B.
+        assert_ne!(structure_a.has_dimension("STRUCT_B".to_string()), true);
+        assert_ne!(structure_a.contains_attribute(attribute_b.bytes()), true);
+
+        // struct_b should not contain dimension STRUCT_A & Attribute A.
+        assert_ne!(structure_b.has_dimension("STRUCT_A".to_string()), true);
+        assert_ne!(structure_b.contains_attribute(attribute_a.bytes()), true);
+
+        // extend struct_a with struct_b
+        structure_a.extend(&structure_b).unwrap();
+
+        // struct_a should  contain dimension STRUCT_B & Attribute B.
+        assert_eq!(structure_a.has_dimension("STRUCT_B".to_string()), true);
+        assert_eq!(structure_a.contains_attribute(attribute_b.bytes()), true);
+
+        let mut structure_c = AccessStructure::new();
+        let attribute_c = crate::policy::QualifiedAttribute::from(("STRUCT_C", "C"));
+
+        structure_c.add_anarchy("STRUCT_C".to_string()).unwrap();
+        structure_c.add_attribute(attribute_c.clone(), None).unwrap();
+
+        structure_c.extend(&structure_b).unwrap();
+        structure_c.extend(&structure_a).unwrap();
+
+        assert_eq!(structure_c.has_dimension("STRUCT_A".to_string()), true);
+        assert_eq!(structure_c.contains_attribute(attribute_a.bytes()), true);
+        assert_eq!(structure_c.has_dimension("STRUCT_B".to_string()), true);
+        assert_eq!(structure_c.contains_attribute(attribute_b.bytes()), true);
+        assert_eq!(structure_c.has_dimension("STRUCT_C".to_string()), true);
+        assert_eq!(structure_c.contains_attribute(attribute_c.bytes()), true);
+    }
 
     #[test]
     fn test_combine() {
