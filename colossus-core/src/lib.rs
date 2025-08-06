@@ -276,6 +276,7 @@ mod test {
             .issue_to(&bob_proof, Some(&NONCE))?;
 
         // bob wants to claims access rights using his age & sex credential but without considering the sex attribute
+        // Bob chooses to omit his sex attribute for privacy reasons
         let (credential_proof_a, claimed_attributes_a) = bob
             .claim_builder(
                 &age_sex_cred,
