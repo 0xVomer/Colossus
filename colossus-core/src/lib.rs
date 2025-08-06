@@ -19,7 +19,7 @@ mod test {
     use std::ops::Deref;
 
     use crate::{
-        access_control::{AccessControl, EncryptedHeader},
+        access_control::{AccessClaim, AccessControl, EncryptedHeader},
         dac::{
             entry::{Entry, MaxEntries},
             keypair::{Alias, CBORCodec, Issuer, verify_proof},
@@ -224,9 +224,15 @@ mod test {
                     Location::claim("innercity".to_string()).qualify(),
                 ])],
             )
-            .select_attribute(Age::claim(25).qualify())
+            .select_attribute(Age::claim(0).qualify())
             .select_attribute(Location::claim("innercity".to_string()).qualify())
-            .generate(&NONCE)?;
+            .generate(&NONCE)
+            .map_err(|e| {
+                println!("Error generating credential proof: {}", e);
+                e
+            })?;
+
+        println!("claims: {claimed_attributes_a:?}");
 
         let (credential_proof_b, claimed_attributes_b) = bob
             .claim_builder(&device_cred, vec![Entry::new(&[Device::claim(0).qualify()])])
@@ -234,22 +240,36 @@ mod test {
             .generate(&NONCE)?;
 
         // verify claim against a set of access rights and the issuer's pubkey & authentication nonce
-        assert!(verify_proof(
-            &issuer_a.public,
-            &credential_proof_a,
-            &claimed_attributes_a,
-            Some(&NONCE)
-        ));
-        assert!(verify_proof(
-            &issuer_b.public,
-            &credential_proof_b,
-            &claimed_attributes_b,
-            Some(&NONCE)
-        ));
+        // assert!(verify_proof(
+        //     &issuer_a.public,
+        //     &credential_proof_a,
+        //     &claimed_attributes_a,
+        //     Some(&NONCE)
+        // ));
+        // assert!(verify_proof(
+        //     &issuer_b.public,
+        //     &credential_proof_b,
+        //     &claimed_attributes_b,
+        //     Some(&NONCE)
+        // ));
 
-        let claims = AccessPolicy::parse("AGE::ADULT && LOC::INNER_CITY").unwrap();
+        // let claims = AccessPolicy::parse("AGE::ADULT && LOC::INNER_CITY").unwrap();
 
-        let capability = access_control.grant_capability(&mut auth, &claims).unwrap();
+        let access_claims: Vec<AccessClaim> = vec![
+            AccessClaim {
+                issuer_id: 1,
+                cred_proof: credential_proof_a,
+                attributes: claimed_attributes_a,
+            },
+            AccessClaim {
+                issuer_id: 2,
+                cred_proof: credential_proof_b,
+                attributes: claimed_attributes_b,
+            },
+        ];
+
+        let capability =
+            access_control.grant_capability(&mut auth, &access_claims, &NONCE).unwrap();
 
         match enc_header
             .decrypt(&access_control, &capability, Some(&NONCE.to_be_bytes()))

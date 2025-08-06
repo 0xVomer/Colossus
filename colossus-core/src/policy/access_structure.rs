@@ -26,8 +26,8 @@ impl AccessStructure {
 }
 
 impl AccessStructure {
-    // Given a set of qualified attributes, generate the set of complementary rights hashes
-    pub fn access_rights_hashes(
+    // Get the access rights associated with the given qualified attributes
+    pub fn get_access_rights(
         &self,
         attributes: &[QualifiedAttribute],
     ) -> Result<HashSet<Right>, Error> {
@@ -41,7 +41,7 @@ impl AccessStructure {
                 Ok::<HashSet<Vec<usize>>, Error>(acc)
             })?;
 
-        points.into_iter().map(Right::hash_from_point).collect()
+        points.into_iter().map(Right::from_point).collect()
     }
 
     pub fn ap_to_access_rights(&self, ap: &AccessPolicy) -> Result<HashSet<Right>, Error> {

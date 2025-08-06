@@ -1,9 +1,9 @@
 use super::*;
 use crate::dac::{
-    entry::Entry,
-    keypair::{CBORCodec, CredProof, IssuerPublic, IssuerPublicCompressed},
+    keypair::{CBORCodec, IssuerPublic, IssuerPublicCompressed, verify_proof},
     zkp::Nonce,
 };
+use crate::policy::QualifiedAttribute;
 
 #[derive(Debug, PartialEq)]
 pub struct CapabilityAuthority {
@@ -76,16 +76,46 @@ impl CapabilityAuthority {
         Ok(self.cred_issuers.len())
     }
 
-    // pub fn authorize_access_rights(
-    //     &mut self,
-    //     issuer: &IssuerPublic,
-    //     claims: &Entry,
-    //     rights: HashSet<Right>,
-    //     cred: &CredProof,
-    //     nonce: Option<&Nonce>,
-    // ) -> Result<(), Error> {
-    //     //let access_rights = self.access_structure.ap_to_access_rights()?;
-    // }
+    fn authorize_access_rights(
+        &mut self,
+        rng: &mut impl CryptoRngCore,
+        claims: &[AccessClaim],
+        nonce: &Nonce,
+    ) -> Result<AccessCapabilityToken, Error> {
+        let mut attribute_set: HashSet<QualifiedAttribute> = HashSet::new();
+        // verify each claim and collect the set of qualified attributes
+        for claim in claims {
+            // get the issuer public key from issuer_id
+            let issuer_pk = self.cred_issuers[claim.issuer_id - 1 as usize].clone();
+            if !verify_proof(&issuer_pk, &claim.cred_proof, &claim.attributes, Some(nonce)) {
+                return Err(Error::InvalidCredProof);
+            }
+            // insert into
+            for entry in claim.attributes.iter() {
+                for attrib in entry.0.iter() {
+                    attribute_set.insert(attrib.clone());
+                }
+            }
+        }
+        let attributes: Vec<QualifiedAttribute> =
+            attribute_set.iter().map(|attrib| attrib.clone()).collect();
+
+        // get the associated access rights
+        let access_rights = self.access_structure.get_access_rights(&attributes)?;
+
+        let access_right_keys = self
+            .get_latest_access_right_sk(access_rights.into_iter())
+            .collect::<Result<RevisionVec<_, _>, Error>>()?;
+        let id = self.generate_cap_id(rng)?;
+        let signature = self.sign_access_rights(&id, &access_right_keys)?;
+
+        Ok(AccessCapabilityToken {
+            id,
+            ps: self.tracers.iter().map(|(_, pi)| pi).cloned().collect(),
+            sk_access_rights: access_right_keys,
+            signature,
+        })
+    }
 
     fn get_latest_access_right_sk<'a>(
         &'a self,
@@ -617,23 +647,32 @@ pub fn refresh_access_rights(
         .collect::<RevisionVec<_, _>>()
 }
 
-pub fn create_capability_token(
+pub fn create_unsafe_capability_token(
     rng: &mut impl CryptoRngCore,
     auth: &mut CapabilityAuthority,
     coordinates: HashSet<Right>,
 ) -> Result<AccessCapabilityToken, Error> {
-    let coordinate_keys = auth
+    let access_right_keys = auth
         .get_latest_access_right_sk(coordinates.into_iter())
         .collect::<Result<RevisionVec<_, _>, Error>>()?;
     let id = auth.generate_cap_id(rng)?;
-    let signature = auth.sign_access_rights(&id, &coordinate_keys)?;
+    let signature = auth.sign_access_rights(&id, &access_right_keys)?;
 
     Ok(AccessCapabilityToken {
         id,
         ps: auth.tracers.iter().map(|(_, pi)| pi).cloned().collect(),
-        sk_access_rights: coordinate_keys,
+        sk_access_rights: access_right_keys,
         signature,
     })
+}
+
+pub fn create_capability_token(
+    rng: &mut impl CryptoRngCore,
+    auth: &mut CapabilityAuthority,
+    claims: &[AccessClaim],
+    nonce: &Nonce,
+) -> Result<AccessCapabilityToken, Error> {
+    auth.authorize_access_rights(rng, claims, nonce)
 }
 
 impl Serializable for CapabilityAuthority {

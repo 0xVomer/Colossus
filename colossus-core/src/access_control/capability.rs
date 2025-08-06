@@ -3,19 +3,16 @@ mod authority;
 mod token;
 mod tracing;
 
+pub use crate::dac::{Attributes, keypair::CredProof, zkp::Nonce};
 pub use access_right::{AccessRightPublicKey, AccessRightSecretKey};
 pub use authority::{
     CapabilityAuthority, CapabilityAuthorityPublicKey, create_capability_token,
-    prune_capability_authority, refresh_access_rights, refresh_capability_authority,
-    refresh_capability_token, update_capability_authority,
+    create_unsafe_capability_token, prune_capability_authority, refresh_access_rights,
+    refresh_capability_authority, refresh_capability_token, update_capability_authority,
 };
 pub use token::AccessCapabilityToken;
 pub use tracing::TracingPublicKey;
 
-use crate::dac::{
-    entry::MaxEntries,
-    keypair::{Issuer, MaxCardinality},
-};
 use crate::{
     access_control::cryptography::{
         ElGamal, Encapsulations, G_hash, H_hash, J_hash, KmacSignature, MIN_TRACING_LEVEL, MlKem,
@@ -78,6 +75,12 @@ impl Serializable for AccessCapabilityId {
     }
 }
 
+pub struct AccessClaim {
+    pub issuer_id: usize,
+    pub cred_proof: CredProof,
+    pub attributes: Vec<Attributes>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,7 +114,7 @@ mod tests {
             let mut auth = CapabilityAuthority::setup(MIN_TRACING_LEVEL + 2, &mut rng).unwrap();
             update_capability_authority(&mut rng, &mut auth, universe.clone()).unwrap();
             let rpk = auth.rpk().unwrap();
-            let cap_token = create_capability_token(&mut rng, &mut auth, user_set).unwrap();
+            let cap_token = create_unsafe_capability_token(&mut rng, &mut auth, user_set).unwrap();
             let (_, enc) = rpk.encapsulate(&mut rng, &target_set).unwrap();
 
             test_serialization(&auth).unwrap();
@@ -128,7 +131,7 @@ mod tests {
             let api = AccessControl::default();
             let (mut msk, mpk) = gen_auth(&api, false).unwrap();
             let cap_token = api
-                .grant_capability(&mut msk, &AccessPolicy::parse("SEC::TOP").unwrap())
+                .grant_unsafe_capability(&mut msk, &AccessPolicy::parse("SEC::TOP").unwrap())
                 .unwrap();
             let (_, enc) = api.encaps(&mpk, &AccessPolicy::parse("DPT::MKG").unwrap()).unwrap();
 
@@ -181,7 +184,7 @@ mod test {
         assert_eq!(enc.count(), 1);
 
         for _ in 0..3 {
-            let cap_token = create_capability_token(
+            let cap_token = create_unsafe_capability_token(
                 &mut rng,
                 &mut auth,
                 HashSet::from_iter([target_coordinate.clone()]),
@@ -191,7 +194,7 @@ mod test {
             assert_eq!(Some(&key), cap_token.decapsulate(&mut rng, &enc).unwrap().as_ref());
         }
 
-        let cap_token = create_capability_token(
+        let cap_token = create_unsafe_capability_token(
             &mut rng,
             &mut auth,
             HashSet::from_iter([other_coordinate.clone()]),
@@ -260,9 +263,9 @@ mod test {
         .unwrap();
         let rpk = auth.rpk().unwrap();
         let mut cap_token_1 =
-            create_capability_token(&mut rng, &mut auth, subspace_1.clone()).unwrap();
+            create_unsafe_capability_token(&mut rng, &mut auth, subspace_1.clone()).unwrap();
         let mut cap_token_2 =
-            create_capability_token(&mut rng, &mut auth, subspace_2.clone()).unwrap();
+            create_unsafe_capability_token(&mut rng, &mut auth, subspace_2.clone()).unwrap();
 
         let (old_key_1, old_enc_1) = rpk.encapsulate(&mut rng, &subspace_1).unwrap();
         let (old_key_2, old_enc_2) = rpk.encapsulate(&mut rng, &subspace_2).unwrap();
@@ -318,8 +321,10 @@ mod test {
             ]),
         )
         .unwrap();
-        let cap_token_1 = create_capability_token(&mut rng, &mut auth, subspace_1.clone()).unwrap();
-        let cap_token_2 = create_capability_token(&mut rng, &mut auth, subspace_2.clone()).unwrap();
+        let cap_token_1 =
+            create_unsafe_capability_token(&mut rng, &mut auth, subspace_1.clone()).unwrap();
+        let cap_token_2 =
+            create_unsafe_capability_token(&mut rng, &mut auth, subspace_2.clone()).unwrap();
 
         let mut old_forged_cap_token = cap_token_1.clone();
         for (key, chain) in cap_token_2.sk_access_rights.iter() {
@@ -349,7 +354,8 @@ mod test {
 
         let (mut auth, _) = gen_auth(&cc, false).unwrap();
         let rpk = cc.update_capability_authority(&mut auth).expect("cannot update master keys");
-        let mut cap_token = cc.grant_capability(&mut auth, &ap).expect("cannot generate cap_token");
+        let mut cap_token =
+            cc.grant_unsafe_capability(&mut auth, &ap).expect("cannot generate cap_token");
 
         let (old_key, old_enc) = cc.encaps(&rpk, &ap).unwrap();
         assert_eq!(Some(&old_key), cap_token.decapsulate(&mut rng, &old_enc).unwrap().as_ref());
@@ -368,7 +374,8 @@ mod test {
         let api = AccessControl::default();
         let (mut auth, _rpk) = gen_auth(&api, false).unwrap();
         let rpk = api.update_capability_authority(&mut auth).expect("cannot update master keys");
-        let cap_token = api.grant_capability(&mut auth, &ap).expect("cannot generate cap_token");
+        let cap_token =
+            api.grant_unsafe_capability(&mut auth, &ap).expect("cannot generate cap_token");
         let (secret, enc) = api.encaps(&rpk, &ap).unwrap();
         let res = api.decaps(&cap_token, &enc).unwrap();
         assert_eq!(secret, res.unwrap());
@@ -387,7 +394,8 @@ mod test {
             &api, &rpk, &ap, ptx, aad,
         )
         .expect("cannot encrypt!");
-        let cap_token = api.grant_capability(&mut auth, &ap).expect("cannot generate cap_token");
+        let cap_token =
+            api.grant_unsafe_capability(&mut auth, &ap).expect("cannot generate cap_token");
         let ptx1 = PkeAc::<{ XChaCha20Poly1305::KEY_LENGTH }, XChaCha20Poly1305>::decrypt(
             &api, &cap_token, &ctx, aad,
         )

@@ -158,7 +158,7 @@ mod serialization {
         let (mut msk, mpk) = gen_auth(&api, false).unwrap();
 
         let ap = AccessPolicy::parse("(DPT::MKG || DPT::FIN) && SEC::TOP").unwrap();
-        let usk = api.grant_capability(&mut msk, &ap).unwrap();
+        let usk = api.grant_unsafe_capability(&mut msk, &ap).unwrap();
 
         let test_encrypted_header = |ap, metadata, authentication_data| {
             let (secret, encrypted_header) =
