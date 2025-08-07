@@ -26,7 +26,7 @@ Colossus adopts [ETSI TS 104 015](https://www.etsi.org/deliver/etsi_ts/104000_10
 
 # Examples:
 
-## Access Control Flow:
+## Attribute-Based Access-Control:
 
 In this example, two individuals have created an alias for themselves as "Alice" and "Bob" and there exist a Colossus Access-Control system with 2 registered credential issuers.
 
@@ -36,15 +36,14 @@ On the other hand, Bob wants to ensure that under no circumstances does Alice kn
 Using Colossus Access-Control, Alice computes a random Nonce value and generates the encrypted-header which conceals the data under the hidden-access policy: "(AGE::ADULT || AGE::SENIOR) && LOC::INNER_CITY && DEVICE::MOBILE" and the random Nonce. Alice then provides the Nonce & Encrypted-Header to Bob.
 
 Bob requests credentials (Age & Sex credential and Device & Location Credential) and computes zero-knowledge proofs which attests to these credentials claiming the following attributes:
-    - Age of 25 => "AGE::ADULT"
-    - Location area of inner-city => "LOC::INNER_CITY"
-    - Device UDI of 0 => "DEVICE::MOBILE"
+- Age of 25 => "AGE::ADULT"
+- Location area of inner-city => "LOC::INNER_CITY"
+- Device UDI of 0 => "DEVICE::MOBILE"
 
 Bob requests a capability-token from the Capability Authority given the zero-knoweledge proof & claimed attributes and Nonce. Capability-Authority verifies the proofs, grants the associated access-rights and issues the capability token to Bob.
 
 Using the capability-token & Nonce Bob is then able to reveal the data hidden within the encrypted-header.
 Under no circumstances did Bob reveal his sex to Alice or to the Capability Authority.
-
 
 
 ### Issuer A (Age + Sex):
@@ -382,9 +381,16 @@ match enc_header
     },
 }
 Ok(())
-
-
 ````
+
+## Key-Exchange Policy:
+
+In this example, a relayer
+
+In this example,
+
+# Potential Applications:
+
 
 # Building & Testing:
 
