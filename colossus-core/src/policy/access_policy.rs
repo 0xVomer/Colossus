@@ -155,6 +155,29 @@ impl super::AccessPolicy {
     }
 }
 
+impl<T> TryFrom<&[T]> for AccessPolicy
+where
+    T: std::fmt::Display + Clone + PartialEq + Eq + std::hash::Hash + std::fmt::Debug,
+{
+    type Error = crate::policy::Error;
+
+    fn try_from(attributes: &[T]) -> Result<Self, Self::Error> {
+        let ap_string = format!(
+            "({})",
+            attributes
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join(" && ")
+        );
+        // create an Access Policy String that joins all unique perms, e.g. "PERM::READ && PERM::WRITE"
+        let ap = AccessPolicy::parse(ap_string.as_str())?;
+        Ok(ap)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::policy::AccessPolicy;

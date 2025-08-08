@@ -383,11 +383,6 @@ match enc_header
 Ok(())
 ````
 
-## Key-Exchange Policy:
-
-In this example, a relayer
-
-In this example,
 
 # Potential Applications:
 
