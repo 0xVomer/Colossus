@@ -176,6 +176,11 @@ impl AccessStructure {
         self.dimensions.values().any(|d| d.has_attribute(&attribute_id))
     }
 
+    pub fn contains_qualified_attribute(&self, attr: &QualifiedAttribute) -> bool {
+        // iterate through each dimension and check if attribute_id entry exists
+        self.dimensions.values().any(|d| d.has_attribute(&attr.bytes()))
+    }
+
     pub fn disable_attribute(&mut self, attr: &QualifiedAttribute) -> Result<(), Error> {
         match self.dimensions.get_mut(&attr.dimension) {
             Some(d) => d.disable_attribute(&attr.bytes()),
