@@ -187,76 +187,6 @@ impl Device {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Permission {
-    READ,
-    WRITE,
-    EXECUTE,
-    SEARCH,
-    UNKNOWN,
-}
-
-impl Permission {
-    fn dimension_label() -> &'static str {
-        "PERM"
-    }
-    fn attribute_label(&self) -> &'static str {
-        match self {
-            Permission::READ => "READ",
-            Permission::WRITE => "WRITE",
-            Permission::EXECUTE => "EXECUTE",
-            Permission::SEARCH => "SEARCH",
-            Permission::UNKNOWN => "UNKNOWN",
-        }
-    }
-
-    pub fn to_string(&self) -> String {
-        format!("{}::{}", Permission::dimension_label(), self.attribute_label())
-    }
-
-    pub fn qualify(&self) -> QualifiedAttribute {
-        QualifiedAttribute::new(Permission::dimension_label(), self.attribute_label())
-    }
-
-    fn read_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Permission::dimension_label(), Permission::READ.attribute_label())
-    }
-
-    fn write_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Permission::dimension_label(), Permission::WRITE.attribute_label())
-    }
-
-    fn execute_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(
-            Permission::dimension_label(),
-            Permission::EXECUTE.attribute_label(),
-        )
-    }
-
-    fn search_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Permission::dimension_label(), Permission::SEARCH.attribute_label())
-    }
-
-    fn unknown_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(
-            Permission::dimension_label(),
-            Permission::UNKNOWN.attribute_label(),
-        )
-    }
-
-    pub fn access_structure() -> Result<AccessStructure> {
-        let mut ac = AccessStructure::new();
-        ac.add_anarchy(Permission::dimension_label().to_string())?;
-        ac.add_attribute(Permission::read_attribute(), None)?;
-        ac.add_attribute(Permission::write_attribute(), None)?;
-        ac.add_attribute(Permission::search_attribute(), None)?;
-        ac.add_attribute(Permission::execute_attribute(), None)?;
-        ac.add_attribute(Permission::unknown_attribute(), None)?;
-
-        Ok(ac)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Challenge {
     HasUserID,
     HasGroupID,
@@ -270,11 +200,105 @@ impl Challenge {
         }
     }
     fn attribute(&self) -> &'static str {
-        "KNOWN"
+        match self {
+            Challenge::HasUserID => "KNOWN",
+            Challenge::HasGroupID => "KNOWN",
+        }
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn label(&self) -> String {
         format!("{}::{}", self.dimension(), self.attribute())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Permission {
+    READ(String),
+    WRITE(String),
+    EXECUTE(String),
+    SEARCH(String),
+}
+
+impl Permission {
+    fn dimension_label(&self) -> &'static str {
+        match self {
+            Permission::READ(_) => "READ",
+            Permission::WRITE(_) => "WRITE",
+            Permission::EXECUTE(_) => "EXECUTE",
+            Permission::SEARCH(_) => "SEARCH",
+        }
+    }
+    fn attribute_label(&self) -> &'static str {
+        match self {
+            Permission::READ(path) => {
+                if path.len() > 1 {
+                    "CAN_READ"
+                } else {
+                    "CANNOT_READ"
+                }
+            },
+            Permission::WRITE(path) => {
+                if path.len() > 1 {
+                    "CAN_WRITE"
+                } else {
+                    "CANNOT_WRITE"
+                }
+            },
+            Permission::EXECUTE(path) => {
+                if path.len() > 1 {
+                    "CAN_EXECUTE"
+                } else {
+                    "CANNOT_EXECUTE"
+                }
+            },
+            Permission::SEARCH(path) => {
+                if path.len() > 1 {
+                    "CAN_SEARCH"
+                } else {
+                    "CANNOT_SEARCH"
+                }
+            },
+        }
+    }
+
+    pub fn label(&self) -> String {
+        format!("{}::{}", self.dimension_label(), self.attribute_label())
+    }
+
+    pub fn qualify(&self) -> QualifiedAttribute {
+        QualifiedAttribute::new(self.dimension_label(), self.attribute_label())
+    }
+
+    pub fn access_structure() -> Result<AccessStructure> {
+        let mut ac = AccessStructure::new();
+
+        ac.add_hierarchy("READ".to_string())?;
+        ac.add_attribute(QualifiedAttribute::from(("READ", "UNKNOWN")), None)?;
+        ac.add_attribute(QualifiedAttribute::from(("READ", "CANNOT_READ")), Some("UNKNOWN"))?;
+        ac.add_attribute(QualifiedAttribute::from(("READ", "CAN_READ")), Some("CANNOT_READ"))?;
+
+        ac.add_hierarchy("WRITE".to_string())?;
+        ac.add_attribute(QualifiedAttribute::from(("WRITE", "UNKNOWN")), None)?;
+        ac.add_attribute(QualifiedAttribute::from(("WRITE", "CANNOT_WRITE")), Some("UNKNOWN"))?;
+        ac.add_attribute(QualifiedAttribute::from(("WRITE", "CAN_WRITE")), Some("CANNOT_WRITE"))?;
+
+        ac.add_hierarchy("EXECUTE".to_string())?;
+        ac.add_attribute(QualifiedAttribute::from(("EXECUTE", "UNKNOWN")), None)?;
+        ac.add_attribute(QualifiedAttribute::from(("EXECUTE", "CANNOT_EXECUTE")), Some("UNKNOWN"))?;
+        ac.add_attribute(
+            QualifiedAttribute::from(("EXECUTE", "CAN_EXECUTE")),
+            Some("CANNOT_EXECUTE"),
+        )?;
+
+        ac.add_hierarchy("SEARCH".to_string())?;
+        ac.add_attribute(QualifiedAttribute::from(("SEARCH", "UNKNOWN")), None)?;
+        ac.add_attribute(QualifiedAttribute::from(("SEARCH", "CANNOT_SEARCH")), Some("UNKNOWN"))?;
+        ac.add_attribute(
+            QualifiedAttribute::from(("SEARCH", "CAN_SEARCH")),
+            Some("CANNOT_SEARCH"),
+        )?;
+
+        Ok(ac)
     }
 }
 
