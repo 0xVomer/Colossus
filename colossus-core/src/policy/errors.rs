@@ -1,46 +1,70 @@
-use core::{fmt::Display, num::TryFromIntError};
+use core::num::TryFromIntError;
 
 use cosmian_crypto_core::CryptoCoreError;
+use thiserror::Error;
 
-#[derive(Debug)]
+/// Errors that can occur during policy operations.
+#[derive(Error, Debug)]
 pub enum PolicyError {
+    /// KEM operation failed
+    #[error("KEM error: {0}")]
     Kem(String),
-    CryptoCoreError(CryptoCoreError),
-    KeyError(String),
-    AttributeNotFound(String),
-    ExistingDimension(String),
-    OperationNotPermitted(String),
-    InvalidBooleanExpression(String),
-    InvalidAttribute(String),
-    DimensionNotFound(String),
-    ConversionFailed(String),
-    Tracing(String),
-    IncompatibleDimensions,
-    InvalidCredProof,
-}
 
-impl Display for PolicyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Kem(err) => write!(f, "Kyber error: {err}"),
-            Self::CryptoCoreError(err) => write!(f, "CryptoCore error{err}"),
-            Self::KeyError(err) => write!(f, "{err}"),
-            Self::AttributeNotFound(err) => write!(f, "attribute not found: {err}"),
-            Self::ExistingDimension(dimension) => {
-                write!(f, "dimension {dimension} already exists")
-            },
-            Self::InvalidBooleanExpression(expr_str) => {
-                write!(f, "invalid boolean expression: {expr_str}")
-            },
-            Self::InvalidAttribute(attr) => write!(f, "invalid attribute: {attr}"),
-            Self::DimensionNotFound(dim_str) => write!(f, "cannot find dimension: {dim_str}"),
-            Self::ConversionFailed(err) => write!(f, "Conversion failed: {err}"),
-            Self::OperationNotPermitted(err) => write!(f, "Operation not permitted: {err}"),
-            Self::Tracing(err) => write!(f, "tracing error: {err}"),
-            Self::IncompatibleDimensions => write!(f, "incompatible dimensions"),
-            Self::InvalidCredProof => write!(f, "invalid credential proof"),
-        }
-    }
+    /// Underlying crypto library error
+    #[error("CryptoCore error: {0}")]
+    CryptoCoreError(#[from] CryptoCoreError),
+
+    /// Key-related error
+    #[error("key error: {0}")]
+    KeyError(String),
+
+    /// The requested attribute was not found
+    #[error("attribute not found: {0}")]
+    AttributeNotFound(String),
+
+    /// Attempted to add a dimension that already exists
+    #[error("dimension '{0}' already exists")]
+    ExistingDimension(String),
+
+    /// The operation is not permitted in the current state
+    #[error("operation not permitted: {0}")]
+    OperationNotPermitted(String),
+
+    /// The boolean expression is invalid or malformed
+    #[error("invalid boolean expression: {0}")]
+    InvalidBooleanExpression(String),
+
+    /// The attribute format is invalid
+    #[error("invalid attribute: {0}")]
+    InvalidAttribute(String),
+
+    /// The requested dimension was not found
+    #[error("dimension not found: {0}")]
+    DimensionNotFound(String),
+
+    /// Type conversion failed
+    #[error("conversion failed: {0}")]
+    ConversionFailed(String),
+
+    /// Tracing-related error
+    #[error("tracing error: {0}")]
+    Tracing(String),
+
+    /// Dimensions are incompatible for the operation
+    #[error("incompatible dimensions")]
+    IncompatibleDimensions,
+
+    /// The credential proof is invalid
+    #[error("invalid credential proof")]
+    InvalidCredProof,
+
+    /// A mutex lock was poisoned (another thread panicked while holding the lock)
+    #[error("mutex lock poisoned")]
+    MutexPoisoned,
+
+    /// Poseidon2 AEAD operation failed
+    #[error("Poseidon2 AEAD error: {0}")]
+    Poseidon2Error(String),
 }
 
 impl From<TryFromIntError> for PolicyError {
@@ -49,10 +73,8 @@ impl From<TryFromIntError> for PolicyError {
     }
 }
 
-impl From<CryptoCoreError> for PolicyError {
-    fn from(e: CryptoCoreError) -> Self {
-        Self::CryptoCoreError(e)
+impl From<crate::dac::error::Error> for PolicyError {
+    fn from(e: crate::dac::error::Error) -> Self {
+        Self::ConversionFailed(e.to_string())
     }
 }
-
-impl std::error::Error for PolicyError {}

@@ -1,57 +1,57 @@
-#[derive(Debug)]
+use thiserror::Error;
+
+/// Errors that can occur during credential update operations.
+#[derive(Error, Debug)]
 pub enum UpdateError {
+    /// Generic update error with message
+    #[error("update error: {0}")]
     Error(String),
 }
 
-impl std::error::Error for UpdateError {}
-
-impl std::fmt::Display for UpdateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            UpdateError::Error(e) => write!(f, "UpdateError: {}", e),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+/// Errors that can occur during issuer operations.
+#[derive(Error, Debug, Clone)]
 pub enum IssuerError {
+    /// Too many attributes per entry (exceeds max cardinality)
+    #[error(
+        "too many attributes per entry: reduce the number of attributes to be less than the max cardinality of this Issuer"
+    )]
     TooLargeCardinality,
+
+    /// Too many entries (exceeds max entries)
+    #[error(
+        "too many entries: reduce the number of entries to be less than the max entries of this Issuer"
+    )]
     TooLongEntries,
+
+    /// Attributes are not covered by the issuer's access structure
+    #[error(
+        "attributes not covered: the attributes are not covered by the issuer's access structure"
+    )]
     AttributesNotCovered,
+
+    /// The alias proof is invalid
+    #[error("invalid alias proof: the proof of the pseudoalias is invalid")]
     InvalidAliasProof,
+
+    /// The verification key is invalid or malformed
+    #[error("invalid verification key: {0}")]
+    InvalidVerificationKey(String),
+
+    /// Update operation failed
+    #[error("update error: {0}")]
     UpdateError(String),
+
+    /// Access structure error
+    #[error("access structure error: {0}")]
     AccessStructureError(String),
+
+    /// Access rights are not covered by the credential
+    #[error("access rights not covered: the access rights are not covered by your credential")]
     AccessRightsNotCovered,
-}
 
-impl std::error::Error for IssuerError {}
-
-impl std::fmt::Display for IssuerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            IssuerError::TooLargeCardinality => write!(
-                f,
-                "TooLargeCardinality. You passed too many attributes per Entry. Hint: reduce the number of attributes to be less than the max cardinality of this Issuer."
-            ),
-            IssuerError::TooLongEntries => write!(
-                f,
-                "TooLongEntries. You passed too many Entries. Hint: reduce the number of Entries to be less than the max entries of this Issuer."
-            ),
-            IssuerError::InvalidAliasProof => {
-                write!(f, "InvalidAliasProof. The proof of the pseudoalias is invalid.")
-            },
-            IssuerError::UpdateError(e) => write!(f, "UpdateError: {}", e),
-            IssuerError::AttributesNotCovered => write!(
-                f,
-                "AttributesNotCovered. The attributes you passed are not covered by the issuer's access structure."
-            ),
-            IssuerError::AccessRightsNotCovered => write!(
-                f,
-                "AccessRightsNotCovered. The access rights you passed are not covered by your credential."
-            ),
-            IssuerError::AccessStructureError(e) => write!(f, "AccessStructureError: {}", e),
-        }
-    }
+    /// Scalar inversion failed (scalar was zero)
+    #[error("scalar inversion failed: scalar is zero")]
+    ScalarInversionFailed,
 }
 
 impl From<UpdateError> for IssuerError {

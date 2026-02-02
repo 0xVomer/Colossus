@@ -1,3 +1,6 @@
+// receive_cred and send_convert_sig are internal protocol steps, exposed for testing
+#![allow(dead_code)]
+
 use super::{AccessCredential, Attributes, CBORCodec, CredProof, Initial, Randomized, Signature};
 use crate::dac::{
     builder::ClaimBuilder,
@@ -122,6 +125,8 @@ impl<Stage> Alias<Stage> {
         }
     }
 
+    /// Creates a randomized version of this alias for unlinkable presentations.
+    #[must_use]
     pub fn randomize(&self) -> Alias<Randomized> {
         let rng = CsRng::from_entropy();
 
@@ -142,6 +147,8 @@ impl<Stage> Alias<Stage> {
         ClaimBuilder::new(self, cred, all_attributes)
     }
 
+    /// Extends a credential with additional attributes.
+    #[must_use = "this returns a new credential with extended attributes"]
     pub fn extend(
         &self,
         cred: &AccessCredential,
@@ -182,6 +189,8 @@ impl<Stage> Alias<Stage> {
         }
     }
 
+    /// Generates a zero-knowledge proof for selective attribute disclosure.
+    #[must_use]
     pub fn prove(
         &self,
         cred: &AccessCredential,
@@ -229,6 +238,8 @@ impl<Stage> Alias<Stage> {
         }
     }
 
+    /// Generates a proof of alias ownership bound to a nonce.
+    #[must_use]
     pub fn alias_proof(&self, nonce: &Nonce) -> AliasProof {
         let (pedersen_commit, pedersen_open) = self.public.damgard.announce(nonce);
 
@@ -302,13 +313,27 @@ impl Alias<Randomized> {
         Alias::new_from_secret(secret_wit)
     }
 
-    fn send_convert_sig(&self, vk: &[VK], mut sigma: Signature) -> Signature {
-        if let VK::G1(vk0) = &vk[0] {
-            sigma.t += (vk0 * self.secret.expose_secret()).neg();
+    fn send_convert_sig(
+        &self,
+        vk: &[VK],
+        mut sigma: Signature,
+    ) -> Result<Signature, crate::dac::error::Error> {
+        if vk.is_empty() {
+            return Err(crate::dac::error::Error::InvalidVerificationKey {
+                expected: String::from("non-empty verification key"),
+                found: String::from("empty verification key"),
+            });
+        }
 
-            sigma
-        } else {
-            panic!("Invalid verification key"); // TODO: Remove panics, switch to Result
+        match &vk[0] {
+            VK::G1(vk0) => {
+                sigma.t += (vk0 * self.secret.expose_secret()).neg();
+                Ok(sigma)
+            },
+            VK::G2(_) => Err(crate::dac::error::Error::InvalidVerificationKey {
+                expected: String::from("G1"),
+                found: String::from("G2"),
+            }),
         }
     }
 }

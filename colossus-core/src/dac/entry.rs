@@ -115,17 +115,23 @@ impl std::cmp::PartialEq<MaxEntries> for usize {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::policy::QualifiedAttribute;
+    use crate::crypto::{Felt, Word};
+    use crate::policy::BlindedAttribute;
 
     #[test]
     fn test_entry() {
-        let entry = Entry::<QualifiedAttribute>(vec![]);
+        let entry = Entry::<BlindedAttribute>(vec![]);
         assert!(entry.is_empty());
     }
 
     #[test]
     fn test_convert_entry_to_big() {
-        let entry = Entry::<QualifiedAttribute>::new(&[QualifiedAttribute::from(("DPT", "FIN"))]);
+        // Create a test BlindedAttribute using a deterministic commitment
+        let test_commitment =
+            Word::new([Felt::new(100), Felt::new(200), Felt::new(300), Felt::new(400)]);
+        let blinded_attr = BlindedAttribute::from_commitment(test_commitment);
+
+        let entry = Entry::<BlindedAttribute>::new(&[blinded_attr]);
         let scalars = entry_to_scalar(&entry);
         assert_eq!(scalars.len(), 1);
     }

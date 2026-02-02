@@ -1,7 +1,15 @@
-pub mod ae;
+// Mathematical notation from cryptographic papers uses uppercase letters (H, K, T, U, etc.)
+// These are intentional and follow standard cryptographic conventions
+#![allow(non_snake_case)]
+
+pub mod ae_poseidon2;
 mod mlkem;
 mod nike;
 pub mod traits;
+
+// Re-exported for use by encrypted_header and other modules
+#[allow(unused_imports)]
+pub use ae_poseidon2::{POSEIDON2_KEY_SIZE, Poseidon2Aead};
 
 use crate::policy::Error;
 use cosmian_crypto_core::{

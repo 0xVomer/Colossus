@@ -1,24 +1,23 @@
 [package]
 name = "colossus-core"
 version = "1.0.0-beta.1"
-description = ""
+description = "Privacy-aware capability-based security framework"
 authors = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-build = "src/build.rs"
 
-[build-dependencies]
-protobuf-codegen = "3"
-protobuf-parse = "3"
+[features]
+default = []
+# Enable test VRF key for development/testing. NEVER use in production!
+test-vrf-key = []
 
 [dependencies]
 blastkids = { workspace = true}
 secrecy = {workspace = true}
 bls12_381_plus  = { workspace = true }
 cid = { workspace = true }
-async-recursion = {workspace = true}
-async-trait = {workspace = true}
+# async-recursion and async-trait removed (only used by storage/directory)
 curve25519-dalek = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -30,13 +29,13 @@ rand-utils = {workspace =  true}
 zeroize = { workspace = true }
 ed25519-dalek = { workspace = true }
 tracing = { workspace = true }
-dashmap = { workspace = true }
+# dashmap removed (only used by storage)
 paste = {workspace = true}
-tokio = { version = "1.46", features = ["sync", "time", "rt"] }
+# tokio removed from main deps (only used by storage/directory, still in dev-deps for tests)
 colored = { workspace = true }
 log = { workspace = true }
 once_cell = { workspace = true }
-protobuf = { workspace = true }
+# protobuf removed (proto module removed)
 blake3 = { workspace = true }
 winter-crypto = { workspace = true }
 winter-math = { workspace = true }
@@ -46,11 +45,14 @@ hashbrown = { workspace = true }
 num = { workspace = true }
 num-complex = { workspace = true }
 sha3 = { workspace = true }
+sha2 = "0.10"
 cosmian_crypto_core = { workspace = true }
 ml-kem = { workspace = true }
 tiny-keccak = { workspace = true }
 rayon = { workspace = true }
 ciborium = {workspace = true}
+subtle = { workspace = true }
+miden-crypto = { workspace = true }
 
 [dev-dependencies]
 criterion = "0.6.0"
@@ -77,3 +79,7 @@ rstest = { version = "0.25" }
 seq-macro = { version = "0.3" }
 lazy_static = "1.5.0"
 anyhow = "1.0.98"
+
+[[bench]]
+name = "poseidon2_aead"
+harness = false

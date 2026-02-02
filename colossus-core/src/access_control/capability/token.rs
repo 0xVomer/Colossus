@@ -1,3 +1,6 @@
+// Mathematical notation from cryptographic papers uses uppercase letters
+#![allow(non_snake_case)]
+
 use super::*;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -9,10 +12,12 @@ pub struct AccessCapabilityToken {
 }
 
 impl AccessCapabilityToken {
+    #[allow(dead_code)] // Reserved for tracing functionality
     pub(crate) fn tracing_level(&self) -> usize {
         self.id.tracing_level()
     }
 
+    #[allow(dead_code)] // Reserved for capability introspection
     pub(crate) fn count(&self) -> usize {
         self.sk_access_rights.len()
     }

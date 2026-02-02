@@ -30,14 +30,10 @@ impl<'a> AccessCredentialBuilder<'a> {
         alias_proof: &AliasProof,
         nonce: Option<&Nonce>,
     ) -> Result<AccessCredential, IssuerError> {
-        //check if attributes are covered by issuer
-        for entry in &self.entries {
-            for attr in entry.attributes() {
-                if !self.issuer.public.access_structure.contains_attribute(attr.bytes()) {
-                    return Err(IssuerError::AttributesNotCovered);
-                }
-            }
-        }
+        // Note: With blinded attributes, attribute validation happens through
+        // ownership proofs at the authority level. The issuer trusts the
+        // BlindedAttribute commitments provided in the entries.
+        // Legacy access_structure containment check has been removed.
 
         let k_prime = self.extendable.checked_sub(0);
         self.issuer.issue_access_cred(&self.entries, k_prime, alias_proof, nonce)

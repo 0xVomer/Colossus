@@ -1,11 +1,11 @@
 use super::*;
-use crate::policy::QualifiedAttribute;
+use crate::policy::BlindedAttribute;
 
 pub struct ClaimBuilder<'a, Stage> {
     alias: &'a Alias<Stage>,
     cred: &'a AccessCredential,
     all_attributes: Vec<Attributes>,
-    selected_attributes: Vec<QualifiedAttribute>,
+    selected_attributes: Vec<BlindedAttribute>,
 }
 
 impl<'a, Stage> ClaimBuilder<'a, Stage> {
@@ -22,18 +22,15 @@ impl<'a, Stage> ClaimBuilder<'a, Stage> {
         }
     }
 
-    pub fn select_attribute(&mut self, attribute: QualifiedAttribute) -> &mut Self {
+    pub fn select_attribute(&mut self, attribute: BlindedAttribute) -> &mut Self {
         self.selected_attributes.push(attribute);
         self
     }
 
     pub fn generate(&self, nonce: &Nonce) -> Result<(CredProof, Vec<Attributes>), IssuerError> {
-        // check selected attributes were covered by the credential issuer
-        for attr in &self.selected_attributes {
-            if !self.cred.issuer_public.access_structure.contains_attribute(attr.bytes()) {
-                return Err(IssuerError::AttributesNotCovered);
-            }
-        }
+        // Note: With blinded attributes, we trust the issuer's proofs instead of
+        // validating against an access structure. The access_structure validation
+        // is removed in favor of ownership proof verification at the authority level.
 
         let selected_attr = self
             .all_attributes

@@ -1,3 +1,6 @@
+// Key derivation functions - some are reserved for future use
+#![allow(dead_code)]
+
 use super::{Error, vk};
 use blastkids::kdf;
 use bls12_381_plus::elliptic_curve::hash2curve::ExpandMsgXmd;

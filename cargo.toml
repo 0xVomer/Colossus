@@ -74,3 +74,4 @@ num = { version = "0.4", default-features = false, features = ["alloc", "libm"] 
 num-complex = { version = "0.4", default-features = false }
 sha3 = { version = "0.10", default-features = false }
 ciborium = "0.2.2"
+miden-crypto = { version = "0.22.2", default-features = false, features = ["std"] }

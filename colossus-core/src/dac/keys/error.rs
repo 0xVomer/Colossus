@@ -1,3 +1,6 @@
+// Error type used by kdf module functions
+#![allow(dead_code)]
+
 use thiserror::Error;
 
 #[derive(Error, Debug)]
