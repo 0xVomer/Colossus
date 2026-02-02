@@ -328,7 +328,6 @@ pub fn change_rel(
 pub mod fixtures {
 
     use super::*;
-    use crate::policy::AccessStructure;
 
     pub fn make_test_credential() -> AccessCredential {
         let rng = CsRng::from_entropy();
@@ -344,7 +343,6 @@ pub mod fixtures {
         let opening_vector = vec![Scalar::random(&mut rng.clone())];
         let issuer_public = IssuerPublic {
             vk: vec![VK::G1(G1Projective::random(&mut rng.clone()))],
-            access_structure: AccessStructure::new(),
             parameters: ParamSetCommitment {
                 pp_commit_g1: vec![G1Projective::random(&mut rng.clone())],
                 pp_commit_g2: vec![G2Projective::random(&mut rng.clone())],

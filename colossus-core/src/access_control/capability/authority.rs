@@ -1,13 +1,17 @@
+// Mathematical notation from cryptographic papers uses uppercase letters
+#![allow(non_snake_case)]
+
 use super::*;
-use crate::dac::{
-    keypair::{CBORCodec, IssuerPublic, IssuerPublicCompressed, verify_proof},
-    zkp::Nonce,
-};
-use crate::policy::QualifiedAttribute;
+use crate::crypto::{Falcon512PublicKey, hash::Poseidon2Hash};
+use crate::policy::{BlindedAccessStructure, BlindedAttribute, IssuerRegistration};
+use bls12_381_plus::elliptic_curve::subtle::ConstantTimeEq;
+use miden_crypto::Word;
 
 #[derive(Debug, PartialEq)]
 pub struct CapabilityAuthority {
-    pub access_structure: AccessStructure,
+    /// Privacy-preserving blinded access structure.
+    /// All attributes are stored as commitments only.
+    pub blinded_structure: Option<BlindedAccessStructure>,
 
     signing_key: Option<SymmetricKey<SIGNING_KEY_LENGTH>>,
 
@@ -17,7 +21,12 @@ pub struct CapabilityAuthority {
     sk_trace: <ElGamal as Nike>::SecretKey,
     tracers: LinkedList<(<ElGamal as Nike>::SecretKey, <ElGamal as Nike>::PublicKey)>,
 
-    cred_issuers: Vec<IssuerPublic>,
+    /// Blinded issuer registrations (for BlindedAttribute-based flow)
+    blinded_issuers: Vec<(IssuerRegistration, crate::crypto::Falcon512PublicKey)>,
+
+    /// Optional Falcon512 identity for post-quantum attestations.
+    /// Used for external verification, cross-system proofs, and on-chain commitments.
+    identity: Option<AuthorityIdentity>,
 }
 
 impl CapabilityAuthority {
@@ -32,29 +41,166 @@ impl CapabilityAuthority {
         }
 
         Ok(CapabilityAuthority {
-            access_structure: AccessStructure::default(),
+            blinded_structure: None,
             capabilities: HashSet::new(),
             sk_trace: <ElGamal as Nike>::SecretKey::random(rng),
             sk_access_rights: RevisionMap::new(),
             signing_key: Some(SymmetricKey::<SIGNING_KEY_LENGTH>::new(rng)),
-            cred_issuers: Vec::new(),
+            blinded_issuers: Vec::new(),
             tracers: (0..=tracing_level).map(|_| ElGamal::keygen(rng)).collect::<Result<_, _>>()?,
+            identity: None,
         })
+    }
+
+    /// Sets up the authority with a Falcon512 identity for post-quantum attestations.
+    ///
+    /// The identity enables the authority to:
+    /// - Create self-attestations for identity proof
+    /// - Sign delegation certificates to delegate authority
+    /// - Create capability attestations that can be verified externally
+    /// - Generate Poseidon2 commitments suitable for on-chain storage
+    ///
+    /// Note: This uses internal OS entropy for key generation. Use `with_existing_identity`
+    /// if you need to provide a pre-generated identity.
+    pub fn with_identity(mut self) -> Self {
+        self.identity = Some(AuthorityIdentity::new());
+        self
+    }
+
+    /// Sets up the authority with a pre-existing identity.
+    ///
+    /// Use this when restoring an authority from persistent storage or when
+    /// the identity was created separately.
+    pub fn with_existing_identity(mut self, identity: AuthorityIdentity) -> Self {
+        self.identity = Some(identity);
+        self
+    }
+
+    /// Returns a reference to the authority's identity, if set.
+    pub fn identity(&self) -> Option<&AuthorityIdentity> {
+        self.identity.as_ref()
+    }
+
+    /// Returns a mutable reference to the authority's identity, if set.
+    pub fn identity_mut(&mut self) -> Option<&mut AuthorityIdentity> {
+        self.identity.as_mut()
+    }
+
+    /// Creates a capability attestation for the given token.
+    ///
+    /// The attestation binds the token to this authority using a Falcon512 signature
+    /// over the token's Poseidon2 commitment. This provides:
+    /// - Post-quantum secure proof of issuance
+    /// - Verifiable link between authority and capability
+    /// - On-chain compatible commitment
+    ///
+    /// Returns `None` if the authority has no identity configured.
+    pub fn attest_token(
+        &self,
+        token: &AccessCapabilityToken,
+        timestamp: u64,
+    ) -> Result<Option<CapabilityAttestation>, Error> {
+        let identity = match &self.identity {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+
+        let commitment = Self::compute_token_commitment(token)?;
+        Ok(Some(CapabilityAttestation::create(identity, commitment, timestamp)))
+    }
+
+    /// Computes a Poseidon2 commitment for a capability token.
+    ///
+    /// The commitment is computed over the serialized token data, producing
+    /// a Miden-compatible Word that can be used for on-chain verification.
+    pub fn compute_token_commitment(token: &AccessCapabilityToken) -> Result<Word, Error> {
+        let token_bytes = token.serialize()?;
+        Ok(Poseidon2Hash::hash_bytes(&token_bytes).as_word().clone())
+    }
+
+    /// Creates a delegation certificate from this authority to another.
+    ///
+    /// Returns `None` if this authority has no identity configured.
+    pub fn delegate_to(
+        &self,
+        delegatee_pk: &Falcon512PublicKey,
+        scope: DelegationScope,
+        expires_at: Option<u64>,
+    ) -> Option<DelegationCertificate> {
+        self.identity.as_ref().map(|id| id.delegate(delegatee_pk, scope, expires_at))
     }
 
     pub fn count(&self) -> usize {
         self.sk_access_rights.len()
     }
 
-    pub fn register_issuer(
+    // ========================================================================
+    // Blinded Attribute Support
+    // ========================================================================
+
+    /// Initialize the blinded access structure for privacy-preserving mode.
+    ///
+    /// This must be called before registering blinded issuers. The authority's
+    /// identity (if set) will be used as the authority public key for binding.
+    pub fn init_blinded_structure(&mut self) -> Result<(), Error> {
+        let authority_pk = self.identity.as_ref().map(|id| id.commitment()).ok_or_else(|| {
+            Error::OperationNotPermitted(
+                "Authority must have an identity to use blinded mode. Call with_identity() first."
+                    .into(),
+            )
+        })?;
+
+        self.blinded_structure = Some(BlindedAccessStructure::new(authority_pk));
+        Ok(())
+    }
+
+    /// Register an issuer using their blinding key registration.
+    ///
+    /// Unlike `register_issuer` which takes an `IssuerPublic` with plaintext
+    /// access structure, this method takes an `IssuerRegistration` which contains
+    /// only the issuer's Falcon512 public key commitment.
+    ///
+    /// # Arguments
+    ///
+    /// * `registration` - The issuer's registration with the authority
+    /// * `issuer_public_key` - The issuer's Falcon512 public key for verification
+    /// * `rng` - Random number generator for key generation
+    ///
+    /// # Returns
+    ///
+    /// The issuer ID (1-indexed) for use in `BlindedCapabilityClaim`.
+    pub fn register_blinded_issuer(
         &mut self,
-        pk: &IssuerPublic,
+        registration: IssuerRegistration,
+        issuer_public_key: crate::crypto::Falcon512PublicKey,
         rng: &mut impl CryptoRngCore,
     ) -> Result<usize, Error> {
-        // extend access structure to include issuer's access structure
-        self.access_structure.extend(&pk.access_structure)?;
-        let rights = self.access_structure.omega()?;
+        // Verify the registration is for this authority
+        let blinded_structure = self.blinded_structure.as_mut().ok_or_else(|| {
+            Error::OperationNotPermitted(
+                "Blinded structure not initialized. Call init_blinded_structure() first.".into(),
+            )
+        })?;
 
+        // Verify the registration signature
+        if !registration.verify(&issuer_public_key) {
+            return Err(Error::OperationNotPermitted(
+                "Invalid issuer registration signature".into(),
+            ));
+        }
+
+        // Verify the registration is for this authority
+        if registration.authority_pk != blinded_structure.authority_pk {
+            return Err(Error::OperationNotPermitted(
+                "Registration is for different authority".into(),
+            ));
+        }
+
+        // Register with the blinded structure
+        blinded_structure.register_issuer(registration.clone())?;
+
+        // Update access rights based on new structure
+        let rights = blinded_structure.omega_as_rights()?;
         let mut secrets = take(&mut self.sk_access_rights);
         secrets.retain(|r| rights.contains_key(r));
 
@@ -72,50 +218,70 @@ impl CapabilityAuthority {
             }
         }
         self.sk_access_rights = secrets;
-        self.cred_issuers.push(pk.clone());
-        Ok(self.cred_issuers.len())
+
+        // Store the issuer
+        self.blinded_issuers.push((registration, issuer_public_key));
+        Ok(self.blinded_issuers.len())
     }
 
-    fn authorize_access_rights(
+    /// Grant a capability token based on blinded access claims.
+    ///
+    /// Unlike `authorize_access_rights` which verifies DAC credential proofs
+    /// and sees the plaintext attributes, this method only verifies ownership
+    /// proofs for blinded attributes. The authority never learns the actual
+    /// attribute values.
+    ///
+    /// # Privacy Properties
+    ///
+    /// - Authority only sees commitments, not actual attribute values
+    /// - Issuer vouches for attributes through Falcon512 signatures
+    /// - Same attributes can have different commitments (unlinkable)
+    fn authorize_blinded_access_rights(
         &mut self,
         rng: &mut impl CryptoRngCore,
-        claims: &[AccessClaim],
-        nonce: &Nonce,
+        claims: &[super::BlindedCapabilityClaim],
     ) -> Result<AccessCapabilityToken, Error> {
-        let mut attribute_set: HashSet<QualifiedAttribute> = HashSet::new();
-        let mut dim_set: HashSet<String> = HashSet::new();
+        let blinded_structure = self.blinded_structure.as_ref().ok_or_else(|| {
+            Error::OperationNotPermitted("Blinded structure not initialized".into())
+        })?;
 
-        // verify each claim and collect the set of qualified attributes
+        // Collect all claimed blinded attributes
+        let mut all_blinded_attrs: Vec<BlindedAttribute> = Vec::new();
+
+        // Verify each claim
         for claim in claims {
-            // get the issuer public key from issuer_id
-            let issuer_pk = self.cred_issuers[claim.issuer_id - 1 as usize].clone();
-            if !verify_proof(&issuer_pk, &claim.cred_proof, &claim.attributes, Some(nonce)) {
+            // Get the issuer's public key from blinded_issuers
+            let issuer_index = claim
+                .issuer_id
+                .checked_sub(1)
+                .ok_or_else(|| Error::KeyError("issuer_id must be >= 1".to_string()))?;
+
+            let (_, issuer_pk) = self.blinded_issuers.get(issuer_index).ok_or_else(|| {
+                Error::KeyError(format!(
+                    "blinded issuer_id {} is out of range (max: {})",
+                    claim.issuer_id,
+                    self.blinded_issuers.len()
+                ))
+            })?;
+
+            // Verify the claim proofs
+            if !claim.verify(issuer_pk) {
                 return Err(Error::InvalidCredProof);
             }
-            // insert into
-            for entry in claim.attributes.iter() {
-                for attrib in entry.0.iter() {
-                    attribute_set.insert(attrib.clone());
-                    dim_set.insert(attrib.dimension.clone());
-                }
-            }
+
+            // Collect the blinded attributes
+            all_blinded_attrs.extend(claim.blinded_attributes.iter().cloned());
         }
 
-        // for every other dimensions that are not covered in the claims, we set an UNKNOWN attribute
-        for dim in self.access_structure.dimensions() {
-            if !dim_set.contains(dim) {
-                attribute_set.insert(QualifiedAttribute::new(dim, "UNKNOWN"));
-            }
-        }
+        // Generate access rights from the blinded attributes
+        let access_rights = blinded_structure.get_access_rights_as_rights(&all_blinded_attrs)?;
 
-        // get the associated access rights
-        let attributes: Vec<QualifiedAttribute> =
-            attribute_set.iter().map(|attrib| attrib.clone()).collect();
-
-        let access_rights = self.access_structure.get_access_rights(&attributes)?;
+        // Convert to the format expected by get_latest_access_right_sk
         let access_right_keys = self
             .get_latest_access_right_sk(access_rights.into_iter())
             .collect::<Result<RevisionVec<_, _>, Error>>()?;
+
+        // Generate capability ID and signature
         let id = self.generate_cap_id(rng)?;
         let signature = self.sign_access_rights(&id, &access_right_keys)?;
 
@@ -125,6 +291,203 @@ impl CapabilityAuthority {
             sk_access_rights: access_right_keys,
             signature,
         })
+    }
+
+    /// Get the authority's public key commitment for blinded registrations.
+    ///
+    /// Returns `None` if the authority has no identity configured.
+    pub fn authority_pk(&self) -> Option<Word> {
+        self.identity.as_ref().map(|id| id.commitment())
+    }
+
+    /// Check if blinded mode is initialized.
+    pub fn is_blinded_mode(&self) -> bool {
+        self.blinded_structure.is_some()
+    }
+
+    /// Get the number of registered blinded issuers.
+    pub fn blinded_issuer_count(&self) -> usize {
+        self.blinded_issuers.len()
+    }
+
+    /// Add a dimension to the blinded access structure.
+    ///
+    /// This must be called after `init_blinded_structure()`.
+    pub fn add_blinded_dimension(
+        &mut self,
+        name: &str,
+        dim_type: crate::policy::DimensionType,
+    ) -> Result<crate::policy::DimensionCommitment, Error> {
+        let blinded_structure = self.blinded_structure.as_mut().ok_or_else(|| {
+            Error::OperationNotPermitted(
+                "Blinded structure not initialized. Call init_blinded_structure() first.".into(),
+            )
+        })?;
+
+        Ok(blinded_structure.add_dimension(name, dim_type))
+    }
+
+    /// Add a blinded attribute to a dimension.
+    ///
+    /// The issuer must be registered, and the ownership proof must be valid.
+    /// This method generates the secret key for this attribute.
+    ///
+    /// # Arguments
+    ///
+    /// * `dimension_commitment` - The commitment returned from `add_blinded_dimension`
+    /// * `blinded_attr` - The blinded attribute from the issuer
+    /// * `proof` - Ownership proof from the issuer
+    /// * `timestamp` - Timestamp for when the attribute was added
+    /// * `rng` - Random number generator for key generation
+    pub fn add_blinded_attribute(
+        &mut self,
+        dimension_commitment: &crate::policy::DimensionCommitment,
+        blinded_attr: BlindedAttribute,
+        proof: &crate::policy::AttributeOwnershipProof,
+        timestamp: u64,
+        rng: &mut impl CryptoRngCore,
+    ) -> Result<usize, Error> {
+        // Get the issuer's public key from blinded_issuers based on the proof's issuer_pk
+        let issuer_pk = self
+            .blinded_issuers
+            .iter()
+            .find(|(reg, _)| reg.issuer_pk == proof.issuer_pk)
+            .map(|(_, pk)| pk)
+            .ok_or_else(|| {
+                Error::OperationNotPermitted("Issuer not registered with authority".into())
+            })?
+            .clone();
+
+        let blinded_structure = self.blinded_structure.as_mut().ok_or_else(|| {
+            Error::OperationNotPermitted("Blinded structure not initialized".into())
+        })?;
+
+        // Add the attribute to the blinded structure
+        let attr_id = blinded_structure.add_attribute(
+            dimension_commitment,
+            blinded_attr,
+            proof,
+            &issuer_pk,
+            timestamp,
+        )?;
+
+        // Regenerate access rights to include new attribute
+        let rights = blinded_structure.omega_as_rights()?;
+        let mut secrets = std::mem::take(&mut self.sk_access_rights);
+        secrets.retain(|r| rights.contains_key(r));
+
+        for (r, status) in rights {
+            if let Some((is_activated, _)) = secrets.get_latest_mut(&r) {
+                *is_activated = crate::policy::AttributeStatus::EncryptDecrypt == status;
+            } else {
+                if crate::policy::AttributeStatus::DecryptOnly == status {
+                    return Err(Error::OperationNotPermitted(
+                        "cannot add decrypt only secret".to_string(),
+                    ));
+                }
+                let secret = AccessRightSecretKey::random(rng)?;
+                secrets.insert(r, (true, secret));
+            }
+        }
+        self.sk_access_rights = secrets;
+
+        Ok(attr_id)
+    }
+
+    /// Add a blinded attribute with name registration for AccessPolicy resolution.
+    ///
+    /// This is the hybrid mode version that allows both privacy-preserving
+    /// attribute storage AND AccessPolicy-based encryption.
+    ///
+    /// # Arguments
+    ///
+    /// * `dimension_commitment` - The commitment returned from `add_blinded_dimension`
+    /// * `dimension_name` - The dimension name (e.g., "AGE")
+    /// * `attribute_name` - The attribute name (e.g., "ADULT")
+    /// * `blinded_attr` - The blinded attribute from the issuer
+    /// * `proof` - Ownership proof from the issuer
+    /// * `timestamp` - Timestamp for when the attribute was added
+    /// * `rng` - Random number generator for key generation
+    pub fn add_blinded_attribute_with_name(
+        &mut self,
+        dimension_commitment: &crate::policy::DimensionCommitment,
+        dimension_name: &str,
+        attribute_name: &str,
+        blinded_attr: BlindedAttribute,
+        proof: &crate::policy::AttributeOwnershipProof,
+        timestamp: u64,
+        rng: &mut impl CryptoRngCore,
+    ) -> Result<usize, Error> {
+        // Get the issuer's public key from blinded_issuers based on the proof's issuer_pk
+        let issuer_pk = self
+            .blinded_issuers
+            .iter()
+            .find(|(reg, _)| reg.issuer_pk == proof.issuer_pk)
+            .map(|(_, pk)| pk)
+            .ok_or_else(|| {
+                Error::OperationNotPermitted("Issuer not registered with authority".into())
+            })?
+            .clone();
+
+        let blinded_structure = self.blinded_structure.as_mut().ok_or_else(|| {
+            Error::OperationNotPermitted("Blinded structure not initialized".into())
+        })?;
+
+        // Add the attribute with name registration
+        let attr_id = blinded_structure.add_attribute_with_name(
+            dimension_commitment,
+            dimension_name,
+            attribute_name,
+            blinded_attr,
+            proof,
+            &issuer_pk,
+            timestamp,
+        )?;
+
+        // Regenerate access rights to include new attribute
+        let rights = blinded_structure.omega_as_rights()?;
+        let mut secrets = std::mem::take(&mut self.sk_access_rights);
+        secrets.retain(|r| rights.contains_key(r));
+
+        for (r, status) in rights {
+            if let Some((is_activated, _)) = secrets.get_latest_mut(&r) {
+                *is_activated = crate::policy::AttributeStatus::EncryptDecrypt == status;
+            } else {
+                if crate::policy::AttributeStatus::DecryptOnly == status {
+                    return Err(Error::OperationNotPermitted(
+                        "cannot add decrypt only secret".to_string(),
+                    ));
+                }
+                let secret = AccessRightSecretKey::random(rng)?;
+                secrets.insert(r, (true, secret));
+            }
+        }
+        self.sk_access_rights = secrets;
+
+        Ok(attr_id)
+    }
+
+    /// Resolve an AccessPolicy to a set of Rights using the blinded structure.
+    ///
+    /// This enables hybrid mode where:
+    /// - Attributes are stored as blinded commitments (privacy-preserving)
+    /// - Encryption uses human-readable AccessPolicy strings
+    pub fn resolve_policy(
+        &self,
+        policy: &crate::policy::AccessPolicy,
+    ) -> Result<std::collections::HashSet<crate::policy::Right>, Error> {
+        let blinded_structure = self.blinded_structure.as_ref().ok_or_else(|| {
+            Error::OperationNotPermitted("Blinded structure not initialized".into())
+        })?;
+
+        blinded_structure
+            .resolve_policy(policy)
+            .map_err(|e| Error::OperationNotPermitted(format!("Failed to resolve policy: {}", e)))
+    }
+
+    /// Get a reference to the blinded structure if initialized.
+    pub fn blinded_structure(&self) -> Option<&BlindedAccessStructure> {
+        self.blinded_structure.as_ref()
     }
 
     fn get_latest_access_right_sk<'a>(
@@ -156,7 +519,6 @@ impl CapabilityAuthority {
                     })
                 })
                 .collect(),
-            access_structure: self.access_structure.clone(),
         })
     }
     pub fn sign_access_rights(
@@ -184,16 +546,29 @@ impl CapabilityAuthority {
         }
     }
 
+    /// Verifies the integrity of a capability token using constant-time comparison.
+    ///
+    /// This prevents timing attacks by ensuring the comparison takes the same
+    /// amount of time regardless of where the signatures differ.
     pub fn verify_capability(&self, cap_token: &AccessCapabilityToken) -> Result<(), Error> {
         let fresh_signature =
             self.sign_access_rights(&cap_token.id, &cap_token.sk_access_rights)?;
-        if fresh_signature != cap_token.signature {
-            Err(Error::KeyError("USK failed the integrity check".to_string()))
-        } else {
+
+        // Use constant-time comparison to prevent timing attacks
+        let signatures_match = match (&fresh_signature, &cap_token.signature) {
+            (Some(fresh), Some(token)) => fresh.ct_eq(token).into(),
+            (None, None) => true,
+            _ => false,
+        };
+
+        if signatures_match {
             Ok(())
+        } else {
+            Err(Error::KeyError("capability token failed the integrity check".to_string()))
         }
     }
 
+    #[allow(dead_code)] // Reserved for future use in capability refresh flow
     pub(super) fn refresh_access_rights(
         auth: &CapabilityAuthority,
         access_rights: RevisionVec<Right, AccessRightSecretKey>,
@@ -438,7 +813,6 @@ impl CapabilityAuthority {
 pub struct CapabilityAuthorityPublicKey {
     pub tpk: TracingPublicKey,
     pub pk_access_rights: HashMap<Right, AccessRightPublicKey>,
-    pub access_structure: AccessStructure,
 }
 
 impl CapabilityAuthorityPublicKey {
@@ -676,13 +1050,30 @@ pub fn create_unsafe_capability_token(
     })
 }
 
-pub fn create_capability_token(
+/// Create a capability token using blinded attribute claims.
+///
+/// This is the privacy-preserving alternative to `create_capability_token`.
+/// The authority never sees the actual attribute values, only blinded commitments
+/// with ownership proofs from the issuer.
+///
+/// # Flow
+///
+/// 1. Authority calls `init_blinded_structure()` to enable blinded mode
+/// 2. Issuers register with `register_blinded_issuer()`
+/// 3. Users create `BlindedCapabilityClaim` with their blinded attributes
+/// 4. This function verifies ownership proofs and grants capability
+///
+/// # Privacy Guarantees
+///
+/// - Authority cannot learn actual attribute values
+/// - Same attributes can have different commitments (unlinkable)
+/// - Issuer signatures prove attribute validity without revealing values
+pub fn create_blinded_capability_token(
     rng: &mut impl CryptoRngCore,
     auth: &mut CapabilityAuthority,
-    claims: &[AccessClaim],
-    nonce: &Nonce,
+    claims: &[super::BlindedCapabilityClaim],
 ) -> Result<AccessCapabilityToken, Error> {
-    auth.authorize_access_rights(rng, claims, nonce)
+    auth.authorize_blinded_access_rights(rng, claims)
 }
 
 impl Serializable for CapabilityAuthority {
@@ -705,16 +1096,11 @@ impl Serializable for CapabilityAuthority {
                 })
                 .sum::<usize>()
             + self.signing_key.as_ref().map_or_else(|| 0, |key| key.len())
-            + self.access_structure.length()
-            + to_leb128_len(self.cred_issuers.len())
-            + self
-                .cred_issuers
-                .iter()
-                .map(|issuer| {
-                    let issuer_cbor = issuer.to_compact().to_cbor().unwrap();
-                    issuer_cbor.len()
-                })
-                .sum::<usize>()
+            // Identity: 1 byte flag + optional serialized identity
+            + 1
+            + self.identity.as_ref().map_or(0, |id| {
+                id.serialize().map_or(0, |bytes| to_leb128_len(bytes.len()) + bytes.len())
+            })
     }
 
     fn write(&self, ser: &mut Serializer) -> Result<usize, Self::Error> {
@@ -743,13 +1129,19 @@ impl Serializable for CapabilityAuthority {
         if let Some(kmac_key) = &self.signing_key {
             n += ser.write_array(&**kmac_key)?;
         }
-        n += ser.write(&self.access_structure)?;
 
-        n += ser.write_leb128_u64(self.cred_issuers.len() as u64)?;
-        for issuer in &self.cred_issuers {
-            let issuer_cbor = issuer.to_compact().to_cbor().unwrap();
-            n += ser.write_vec(&issuer_cbor)?;
+        // Serialize optional identity
+        match &self.identity {
+            Some(identity) => {
+                n += ser.write_leb128_u64(1)?; // has identity flag
+                let identity_bytes = identity.serialize()?;
+                n += ser.write_vec(&identity_bytes)?;
+            },
+            None => {
+                n += ser.write_leb128_u64(0)?; // no identity flag
+            },
         }
+
         Ok(n)
     }
 
@@ -792,25 +1184,28 @@ impl Serializable for CapabilityAuthority {
             Some(SymmetricKey::try_from_bytes(de.read_array::<SIGNING_KEY_LENGTH>()?)?)
         };
 
-        let access_structure = de.read()?;
-
-        let n_issuers = <usize>::try_from(de.read_leb128_u64()?)?;
-        let mut issuers = Vec::new();
-        for _ in 0..n_issuers {
-            let issuer_cbor_bytes = de.read_vec()?;
-            let issuer_compressed = IssuerPublicCompressed::from_cbor(&issuer_cbor_bytes).unwrap();
-            let issuer = IssuerPublic::try_from(issuer_compressed).unwrap();
-            issuers.push(issuer);
-        }
+        // Deserialize optional identity (handle legacy format without identity)
+        let identity = if de.value().is_empty() {
+            None
+        } else {
+            let has_identity = de.read_leb128_u64()?;
+            if has_identity == 1 {
+                let identity_bytes = de.read_vec()?;
+                Some(AuthorityIdentity::deserialize(&identity_bytes)?)
+            } else {
+                None
+            }
+        };
 
         Ok(Self {
             sk_trace: sk,
+            blinded_structure: None, // Blinded structure must be re-initialized after deserialization
             capabilities,
             tracers,
             sk_access_rights: coordinate_keypairs,
             signing_key,
-            access_structure,
-            cred_issuers: issuers,
+            blinded_issuers: Vec::new(), // Blinded issuers must be re-registered after deserialization
+            identity,
         })
     }
 }
@@ -826,7 +1221,6 @@ impl Serializable for CapabilityAuthorityPublicKey {
                 .iter()
                 .map(|(access_right, pk)| access_right.length() + pk.length())
                 .sum::<usize>()
-            + self.access_structure.length()
     }
 
     fn write(&self, ser: &mut Serializer) -> Result<usize, Self::Error> {
@@ -836,7 +1230,6 @@ impl Serializable for CapabilityAuthorityPublicKey {
             n += ser.write(access_right)?;
             n += ser.write(pk)?;
         }
-        n += ser.write(&self.access_structure)?;
 
         Ok(n)
     }
@@ -850,11 +1243,6 @@ impl Serializable for CapabilityAuthorityPublicKey {
             let pk = de.read::<AccessRightPublicKey>()?;
             access_rights.insert(acess_right, pk);
         }
-        let access_structure = de.read::<AccessStructure>()?;
-        Ok(Self {
-            tpk,
-            pk_access_rights: access_rights,
-            access_structure,
-        })
+        Ok(Self { tpk, pk_access_rights: access_rights })
     }
 }

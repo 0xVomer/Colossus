@@ -1,5 +1,8 @@
-use crate::policy::AccessPolicy;
-use cosmian_crypto_core::{Secret, SymmetricKey, reexport::rand_core::CryptoRngCore};
+// These traits define cryptographic abstractions for future extensibility.
+// Some are not yet used but are part of the planned API for key-homomorphic schemes.
+#![allow(dead_code)]
+
+use cosmian_crypto_core::{SymmetricKey, reexport::rand_core::CryptoRngCore};
 use std::ops::Add;
 use std::ops::AddAssign;
 use std::ops::Div;
@@ -8,25 +11,6 @@ use std::ops::MulAssign;
 use std::ops::Sub;
 use std::ops::SubAssign;
 use zeroize::Zeroizing;
-
-pub trait KemAc<const LENGTH: usize> {
-    type EncapsulationKey;
-    type DecapsulationKey;
-    type Encapsulation;
-    type Error: std::error::Error;
-
-    fn encaps(
-        &self,
-        ek: &Self::EncapsulationKey,
-        ap: &AccessPolicy,
-    ) -> Result<(Secret<LENGTH>, Self::Encapsulation), Self::Error>;
-
-    fn decaps(
-        &self,
-        dk: &Self::DecapsulationKey,
-        enc: &Self::Encapsulation,
-    ) -> Result<Option<Secret<LENGTH>>, Self::Error>;
-}
 
 pub trait AE<const KEY_LENGTH: usize> {
     type Error: std::error::Error;
@@ -43,28 +27,6 @@ pub trait AE<const KEY_LENGTH: usize> {
         ctx: &[u8],
         aad: &[u8],
     ) -> Result<Zeroizing<Vec<u8>>, Self::Error>;
-}
-
-pub trait PkeAc<const KEY_LENGTH: usize, E: AE<KEY_LENGTH>> {
-    type EncryptionKey;
-    type DecryptionKey;
-    type Ciphertext;
-    type Error: std::error::Error;
-
-    fn encrypt(
-        &self,
-        ek: &Self::EncryptionKey,
-        ap: &AccessPolicy,
-        ptx: &[u8],
-        aad: &[u8],
-    ) -> Result<Self::Ciphertext, Self::Error>;
-
-    fn decrypt(
-        &self,
-        dk: &Self::DecryptionKey,
-        ctx: &Self::Ciphertext,
-        aad: &[u8],
-    ) -> Result<Option<Zeroizing<Vec<u8>>>, Self::Error>;
 }
 
 pub trait Kem {

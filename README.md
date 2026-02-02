@@ -4,400 +4,292 @@
 
 Colossus is a privacy-aware capability-based security framework that cryptographically enforces Zero-Trust principles ("Never Trust, Always Verify").
 
-# Motivation
+## Key Features
 
+- **Privacy-Preserving Access Control**: Attribute values are hidden from the authority using Poseidon2 cryptographic commitments
+- **Hybrid Blinded Mode**: Human-readable policies (e.g., `"AGE::ADULT && LOC::INNER_CITY"`) combined with privacy-preserving blinded attributes
+- **Quantum-Secure Encryption**: Post-quantum KEM with hidden access policies based on [ETSI TS 104 015](https://www.etsi.org/deliver/etsi_ts/104000_104099/104015/01.01.01_60/ts_104015v010101p.pdf)
+- **Multi-Issuer Federation**: Credentials from multiple issuers can be combined to satisfy access policies
+- **Capability-Based Security**: Access tokens grant specific rights without revealing underlying attributes
 
-# Capability-Based Access-Control:
+## Architecture
 
-Colossus implements an access-control system that is based on the capability-based security paradigm. This paradigm ensures that access to resources is granted only to those who have the necessary capabilities to access them.
+```
++------------------+     +-------------------+     +------------------+
+|   Credential     |     |    Capability     |     |    Encrypted     |
+|    Issuers       |---->|    Authority      |---->|     Content      |
++------------------+     +-------------------+     +------------------+
+        |                        ^                        |
+        |                        |                        |
+        v                        |                        v
++------------------+     +-------------------+     +------------------+
+|    Blinded       |     |   Capability      |     |    Decrypted     |
+|   Attributes     |     |     Token         |     |     Content      |
++------------------+     +-------------------+     +------------------+
+```
 
-## Capability-Authority:
+## Privacy Model
 
-### Capability-Tokens:
+Colossus implements a **hybrid blinded mode** that provides:
 
-### Quantum-Secure KEM with Hidden-Access Policy:
+1. **Issuer Privacy**: Issuers create blinded attributes using Poseidon2 commitments. The authority never sees actual attribute values.
+2. **User Privacy**: Users can selectively disclose attributes. In the example below, Bob doesn't reveal his sex to anyone.
+3. **Policy Expressiveness**: Encryptors use human-readable policies like `"AGE::ADULT && LOC::INNER_CITY"`.
+4. **Cross-Authority Unlinkability**: The same attribute registered with different authorities produces different commitments.
 
-Colossus adopts [ETSI TS 104 015](https://www.etsi.org/deliver/etsi_ts/104000_104099/104015/01.01.01_60/ts_104015v010101p.pdf) standard by building upon the implementation of [covercrypt](https://github.com/Cosmian/cover_crypt).
+## Quick Start
 
-## Credential-Issuer:
+### Installation
 
-### Anonymous-Credentials:
+Add Colossus to your `Cargo.toml`:
 
+```toml
+[dependencies]
+colossus-core = { git = "https://github.com/FeurJak/Colossus.git" }
+```
 
-# Examples:
-
-## Attribute-Based Access-Control:
-
-In this example, two individuals have created an alias for themselves as "Alice" and "Bob" and there exist a Colossus Access-Control system with 2 registered credential issuers.
-
-Alice wishes to share some data to Bob but requires that Bob must be either an adult or a senior, lives in the inner-city area and is viewing the data on a mobile device.
-On the other hand, Bob wants to ensure that under no circumstances does Alice know of Bob's sex.
-
-Using Colossus Access-Control, Alice computes a random Nonce value and generates the encrypted-header which conceals the data under the hidden-access policy: "(AGE::ADULT || AGE::SENIOR) && LOC::INNER_CITY && DEVICE::MOBILE" and the random Nonce. Alice then provides the Nonce & Encrypted-Header to Bob.
-
-Bob requests credentials (Age & Sex credential and Device & Location Credential) and computes zero-knowledge proofs which attests to these credentials claiming the following attributes:
-- Age of 25 => "AGE::ADULT"
-- Location area of inner-city => "LOC::INNER_CITY"
-- Device UDI of 0 => "DEVICE::MOBILE"
-
-Bob requests a capability-token from the Capability Authority given the zero-knoweledge proof & claimed attributes and Nonce. Capability-Authority verifies the proofs, grants the associated access-rights and issues the capability token to Bob.
-
-Using the capability-token & Nonce Bob is then able to reveal the data hidden within the encrypted-header.
-Under no circumstances did Bob reveal his sex to Alice or to the Capability Authority.
-
-
-### Issuer A (Age + Sex):
+### Basic Usage
 
 ```rust
-pub struct Age(u8);
+use colossus_core::prelude::*;
+use colossus_core::access_control::{AccessControl, EncryptedHeader};
+use colossus_core::access_control::capability::{BlindedCapabilityClaim, create_blinded_capability_token};
+use colossus_core::policy::{AccessPolicy, BlindedClaimBuilder, DimensionType, IssuerBlindingKey};
 
-impl Age {
-    pub fn claim(age: u8) -> Self {
-        Self(age)
+fn main() -> anyhow::Result<()> {
+    let mut rng = cosmian_crypto_core::CsRng::from_entropy();
+
+    // =========================================================================
+    // Phase 1: Authority Setup
+    // =========================================================================
+    let access_control = AccessControl::default();
+    let auth = access_control.setup_blinded_authority()?;
+    let mut auth = auth.with_identity();
+    auth.init_blinded_structure()?;
+    
+    let authority_pk = auth.authority_pk().expect("authority should have pk");
+
+    // =========================================================================
+    // Phase 2: Define Dimensions (Schema)
+    // =========================================================================
+    let age_dim = auth.add_blinded_dimension("AGE", DimensionType::Hierarchy)?;
+    let loc_dim = auth.add_blinded_dimension("LOC", DimensionType::Anarchy)?;
+    let device_dim = auth.add_blinded_dimension("DEVICE", DimensionType::Hierarchy)?;
+
+    // =========================================================================
+    // Phase 3: Register Issuers
+    // =========================================================================
+    
+    // Issuer A manages Age credentials
+    let mut issuer_a = IssuerBlindingKey::new();
+    let reg_a = issuer_a.register_with_authority(authority_pk, 1000);
+    let issuer_a_id = auth.register_blinded_issuer(
+        reg_a, 
+        issuer_a.identity().public_key(), 
+        &mut rng
+    )?;
+
+    // Issuer B manages Location + Device credentials
+    let mut issuer_b = IssuerBlindingKey::new();
+    let reg_b = issuer_b.register_with_authority(authority_pk, 1001);
+    let issuer_b_id = auth.register_blinded_issuer(
+        reg_b, 
+        issuer_b.identity().public_key(), 
+        &mut rng
+    )?;
+
+    // =========================================================================
+    // Phase 4: Publish Blinded Attributes (with names for policy resolution)
+    // =========================================================================
+    let timestamp = 2000u64;
+
+    // Age attributes (hierarchical)
+    for attr_name in &["YOUTH", "ADULT", "SENIOR"] {
+        let attr = issuer_a.create_blinded_attribute("AGE", attr_name, &authority_pk)?;
+        let proof = issuer_a.prove_ownership("AGE", attr_name, &authority_pk)?;
+        auth.add_blinded_attribute_with_name(
+            &age_dim, "AGE", attr_name, attr, &proof, timestamp, &mut rng
+        )?;
     }
-    fn dimension_label() -> &'static str {
-        "AGE"
+
+    // Location attributes
+    for attr_name in &["INNER_CITY", "EAST_SYDNEY", "WEST_SYDNEY"] {
+        let attr = issuer_b.create_blinded_attribute("LOC", attr_name, &authority_pk)?;
+        let proof = issuer_b.prove_ownership("LOC", attr_name, &authority_pk)?;
+        auth.add_blinded_attribute_with_name(
+            &loc_dim, "LOC", attr_name, attr, &proof, timestamp, &mut rng
+        )?;
     }
-    fn attribute_label(&self) -> &'static str {
-        match self.0 {
-            0..=20 => "YOUTH",
-            21..=60 => "ADULT",
-            61..=100 => "SENIOR",
-            _ => "UNKNOWN",
+
+    // Device attributes
+    for attr_name in &["MOBILE", "LAPTOP"] {
+        let attr = issuer_b.create_blinded_attribute("DEVICE", attr_name, &authority_pk)?;
+        let proof = issuer_b.prove_ownership("DEVICE", attr_name, &authority_pk)?;
+        auth.add_blinded_attribute_with_name(
+            &device_dim, "DEVICE", attr_name, attr, &proof, timestamp, &mut rng
+        )?;
+    }
+
+    let apk = auth.rpk()?;
+
+    // =========================================================================
+    // Phase 5: Alice Encrypts Data with Access Policy
+    // =========================================================================
+    let policy = AccessPolicy::parse(
+        "(AGE::ADULT || AGE::SENIOR) && LOC::INNER_CITY && DEVICE::MOBILE"
+    )?;
+
+    let (secret, enc_header) = EncryptedHeader::generate_with_policy(
+        &access_control,
+        &apk,
+        &auth,
+        &policy,
+        Some(b"alice_secret_metadata"),
+        Some(b"additional_auth_data"),
+    )?;
+
+    // =========================================================================
+    // Phase 6: Bob Claims Attributes and Gets Capability Token
+    // =========================================================================
+    
+    // Bob claims: ADULT, INNER_CITY, MOBILE
+    let claim_a = BlindedClaimBuilder::new(&mut issuer_a, authority_pk)
+        .add_attribute("AGE", "ADULT")
+        .build_batched()?;
+
+    let claim_b = BlindedClaimBuilder::new(&mut issuer_b, authority_pk)
+        .add_attribute("LOC", "INNER_CITY")
+        .add_attribute("DEVICE", "MOBILE")
+        .build_batched()?;
+
+    let capability_claims = vec![
+        BlindedCapabilityClaim::from_batched_claim(issuer_a_id, claim_a),
+        BlindedCapabilityClaim::from_batched_claim(issuer_b_id, claim_b),
+    ];
+
+    let capability = create_blinded_capability_token(&mut rng, &mut auth, &capability_claims)?;
+
+    // =========================================================================
+    // Phase 7: Bob Decrypts Content
+    // =========================================================================
+    match enc_header.decrypt(&access_control, &capability, Some(b"additional_auth_data"))? {
+        Some(data) => {
+            assert_eq!(data.secret, secret);
+            println!("Decrypted metadata: {:?}", data.metadata);
+        }
+        None => {
+            println!("Access denied - insufficient attributes");
         }
     }
-    pub fn qualify(&self) -> QualifiedAttribute {
-        QualifiedAttribute::new(Age::dimension_label(), self.attribute_label())
-    }
 
-    fn young_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Age::dimension_label(), "YOUTH")
-    }
-
-    fn adult_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Age::dimension_label(), "ADULT")
-    }
-
-    fn senior_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Age::dimension_label(), "SENIOR")
-    }
-
-    fn unkown_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Age::dimension_label(), "UNKNOWN")
-    }
-
-    pub fn access_structure() -> Result<AccessStructure> {
-        let mut ac = AccessStructure::new();
-        ac.add_hierarchy(Age::dimension_label().to_string())?;
-        ac.add_attribute(Age::young_attribute(), None)?;
-        ac.add_attribute(Age::adult_attribute(), Some("YOUTH"))?;
-        ac.add_attribute(Age::senior_attribute(), Some("ADULT"))?;
-        ac.add_attribute(Age::unkown_attribute(), Some("SENIOR"))?;
-
-        Ok(ac)
-    }
-}
-
-pub enum Sex {
-    MALE,
-    FEMALE,
-    UNKNOWN,
-}
-
-impl Sex {
-    fn dimension_label() -> &'static str {
-        "SEX"
-    }
-    fn attribute_label(&self) -> &'static str {
-        match self {
-            Sex::MALE => "MALE",
-            Sex::FEMALE => "FEMALE",
-            Sex::UNKNOWN => "UNKNOWN",
-        }
-    }
-    pub fn qualify(&self) -> QualifiedAttribute {
-        QualifiedAttribute::new(Sex::dimension_label(), self.attribute_label())
-    }
-
-    fn male_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Sex::dimension_label(), "MALE")
-    }
-
-    fn female_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Sex::dimension_label(), "FEMALE")
-    }
-    fn unknown_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Sex::dimension_label(), "UNKNOWN")
-    }
-
-    pub fn access_structure() -> Result<AccessStructure> {
-        let mut ac = AccessStructure::new();
-        ac.add_anarchy(Sex::dimension_label().to_string())?;
-        ac.add_attribute(Sex::male_attribute(), None)?;
-        ac.add_attribute(Sex::female_attribute(), None)?;
-        ac.add_attribute(Sex::unknown_attribute(), None)?;
-
-        Ok(ac)
-    }
+    Ok(())
 }
 ```
 
-Credential Issuer A issues credentials supporting age and sex attributes:
+## Access Policy Syntax
 
-- Anyone of 0 to 20 Years of age is considered a "YOUTH".
-- Anyone of 21 to 60 Years of age is considered an "ADULT".
-- Anyone of 61 to 100 Years of age is considered a "SENIOR".
-- Any age exceeding 100 Years is considered "UNKNOWN".
-- Only Male or Female Sex is considered or else "UNKNOWN"
+Colossus uses a simple, expressive policy syntax:
 
+| Syntax | Description |
+|--------|-------------|
+| `DIM::ATTR` | Single attribute requirement |
+| `A && B` | Logical AND - both required |
+| `A \|\| B` | Logical OR - either sufficient |
+| `(A \|\| B) && C` | Grouping with parentheses |
+| `*` | Broadcast - all users can decrypt |
 
-
-### Issuer B (Device + Location)
-
-```rust
-pub struct Location(String);
-
-impl Location {
-    pub fn claim(address: String) -> Self {
-        Self(address)
-    }
-    fn dimension_label() -> &'static str {
-        "LOC"
-    }
-    fn attribute_label(&self) -> &'static str {
-        match self.0.as_str() {
-            "innercity" => "INNER_CITY",
-            "eastsydney" => "EAST_SYDNEY",
-            "westsydney" => "WEST_SYDNEY",
-            _ => "UNKOWN",
-        }
-    }
-    pub fn qualify(&self) -> QualifiedAttribute {
-        QualifiedAttribute::new(Location::dimension_label(), self.attribute_label())
-    }
-
-    fn inner_city_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Location::dimension_label(), "INNER_CITY")
-    }
-
-    fn east_sydney_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Location::dimension_label(), "EAST_SYDNEY")
-    }
-
-    fn west_sydney_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Location::dimension_label(), "WEST_SYDNEY")
-    }
-
-    fn unkown_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Location::dimension_label(), "UNKNOWN")
-    }
-
-    pub fn access_structure() -> Result<AccessStructure> {
-        let mut ac = AccessStructure::new();
-        ac.add_anarchy(Location::dimension_label().to_string())?;
-        ac.add_attribute(Location::inner_city_attribute(), None)?;
-        ac.add_attribute(Location::east_sydney_attribute(), None)?;
-        ac.add_attribute(Location::west_sydney_attribute(), None)?;
-        ac.add_attribute(Location::unkown_attribute(), None)?;
-
-        Ok(ac)
-    }
-}
-
-
-pub struct Device(u8);
-
-impl Device {
-    pub fn claim(udi: u8) -> Self {
-        Self(udi)
-    }
-    fn dimension_label() -> &'static str {
-        "DEVICE"
-    }
-    fn attribute_label(&self) -> &'static str {
-        match self.0 {
-            0..=10 => "MOBILE",
-            11..=40 => "LAPTOP",
-            _ => "UNKOWN",
-        }
-    }
-    pub fn qualify(&self) -> QualifiedAttribute {
-        QualifiedAttribute::new(Device::dimension_label(), self.attribute_label())
-    }
-
-    fn mobile_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Device::dimension_label(), "MOBILE")
-    }
-
-    fn laptop_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Device::dimension_label(), "LAPTOP")
-    }
-
-    fn unkown_attribute() -> QualifiedAttribute {
-        QualifiedAttribute::new(Device::dimension_label(), "UNKOWN")
-    }
-
-    pub fn access_structure() -> Result<AccessStructure> {
-        let mut ac = AccessStructure::new();
-        ac.add_hierarchy(Device::dimension_label().to_string())?;
-        ac.add_attribute(Device::mobile_attribute(), None)?;
-        ac.add_attribute(Device::laptop_attribute(), None)?;
-        ac.add_attribute(Device::unkown_attribute(), None)?;
-
-        Ok(ac)
-    }
-}
-```
-Credential Issuer B issues credentials supporting device and location attributes:
-
-- 3 location-areas are covered:
-    - Inner City ("INNER_CITY")
-    - East Sydney ("EAST_SYDNEY")
-    - West Sydney ("WEST_SYDNEY")
-- Unique Device Identifier (UDI) from 0 to 10 is considered to be a "MOBILE" device
-- Unique Device Identifier (UDI) from 11 to 40 is considered to be a "LAPTOP" device
-- Unique Device Identifier (UDI) exceeding 40 is considered to be an "UNKNOWN" device
-
-
-
-### Complete Flow:
+### Examples
 
 ```rust
-let access_control = AccessControl::default();
-let (mut auth, _) = access_control.setup_capability_authority()?;
+// Simple: requires adult age
+AccessPolicy::parse("AGE::ADULT")?;
 
-// Access-Credential A manages credentials that contains Age + Sex attributes
-let mut access_structure_a = Age::access_structure().unwrap();
-access_structure_a.extend(&Sex::access_structure().unwrap()).unwrap();
+// OR: adult or senior
+AccessPolicy::parse("AGE::ADULT || AGE::SENIOR")?;
 
-let issuer_a = Issuer::setup(None, &access_structure_a);
-let (issuer_a_id, _) = access_control.register_issuer(&mut auth, &issuer_a.public)?;
+// AND: adult in inner city
+AccessPolicy::parse("AGE::ADULT && LOC::INNER_CITY")?;
 
-// Access-Credential B manages credentials that contains Device & Location attributes
-let mut access_structure_b = Location::access_structure().unwrap();
-access_structure_b.extend(&Device::access_structure().unwrap()).unwrap();
+// Complex: (adult or senior) AND inner city AND mobile device
+AccessPolicy::parse("(AGE::ADULT || AGE::SENIOR) && LOC::INNER_CITY && DEVICE::MOBILE")?;
 
-let issuer_b = Issuer::setup(None, &access_structure_b);
-let (issuer_b_id, apk) = access_control.register_issuer(&mut auth, &issuer_b.public)?;
-
-// Alice creates encrypted header with Access Policy
-// Access Policy requires Age, Location, and Device attributes but not Sex attribute
-let (secret, enc_header) = EncryptedHeader::generate(
-    &access_control,
-    &apk,
-    &AccessPolicy::parse(
-        "(AGE::ADULT || AGE::SENIOR) && LOC::INNER_CITY && DEVICE::MOBILE",
-    )
-    .unwrap(),
-    Some("alice_metadata".as_bytes()),
-    Some(&NONCE.to_be_bytes()),
-)
-.unwrap();
-
-// Bob creates an alias
-let mut bob = Alias::new();
-bob = bob.randomize();
-
-// and a proof of his alias using the verification nonce
-let bob_proof = bob.alias_proof(&NONCE);
-
-// Issuer A provides bob with age and location credential
-let age_sex_cred = issuer_a
-    .access_credential()
-    .with_entry(Entry::new(&[Age::claim(25).qualify(), Sex::MALE.qualify()]))
-    .max_entries(&MaxEntries::default())
-    .issue_to(&bob_proof, Some(&NONCE))?;
-
-// Issuer B provides bob with device credential
-let device_location_cred = issuer_b
-    .access_credential()
-    .with_entry(Entry::new(&[
-        Device::claim(0).qualify(),
-        Location::claim("innercity".to_string()).qualify(),
-    ]))
-    .max_entries(&MaxEntries::default())
-    .issue_to(&bob_proof, Some(&NONCE))?;
-
-// bob wants to claims access rights using his age & sex credential
-// Bob chooses to omit his sex attribute for privacy reasons
-let (credential_proof_a, claimed_attributes_a) = bob
-    .claim_builder(
-        &age_sex_cred,
-        vec![Entry::new(&[Age::claim(25).qualify(), Sex::MALE.qualify()])],
-    )
-    // Bob only selects his age attribute
-    .select_attribute(Age::claim(25).qualify())
-    .generate(&NONCE)
-    .map_err(|e| {
-        println!("Error generating credential proof: {}", e);
-        e
-    })?;
-
-// bob also wants to claim access rights using his device & location credential
-let (credential_proof_b, claimed_attributes_b) = bob
-    .claim_builder(
-        &device_location_cred,
-        vec![Entry::new(&[
-            Device::claim(0).qualify(),
-            Location::claim("innercity".to_string()).qualify(),
-        ])],
-    )
-    .select_attribute(Device::claim(0).qualify())
-    .select_attribute(Location::claim("innercity".to_string()).qualify())
-    .generate(&NONCE)?;
-
-// capability is granted to Bob based on the set of his access claims
-let capability = access_control
-    .grant_capability(
-        &mut auth,
-        &vec![
-            // Access Claim from Bob's credential whihc holds age & location attributes
-            AccessClaim {
-                issuer_id: issuer_a_id,
-                cred_proof: credential_proof_a,
-                attributes: claimed_attributes_a,
-            },
-            // Access Claim from Bob's credential which holds device attribute
-            AccessClaim {
-                issuer_id: issuer_b_id,
-                cred_proof: credential_proof_b,
-                attributes: claimed_attributes_b,
-            },
-        ],
-        &NONCE,
-    )
-    .unwrap();
-
-// bob is able to access the hidden metadata using his capability token
-match enc_header
-    .decrypt(&access_control, &capability, Some(&NONCE.to_be_bytes()))
-    .unwrap()
-{
-    Some(data) => {
-        println!("{data:#?}");
-    },
-    None => {
-        panic!("Failed to decrypt metadata");
-    },
-}
-Ok(())
-````
-
-
-# Potential Applications:
-
-
-# Building & Testing:
-
-To build the project, run the following command:
-
+// Broadcast to everyone
+AccessPolicy::broadcast();
 ```
+
+## Dimension Types
+
+| Type | Description | Use Case |
+|------|-------------|----------|
+| `Hierarchy` | Ordered attributes with inheritance | Age levels, security clearances |
+| `Anarchy` | Independent, unordered attributes | Locations, departments |
+
+## Multi-Issuer Federation
+
+Colossus supports credentials from multiple independent issuers:
+
+```rust
+// Government issuer for identity
+let mut gov_issuer = IssuerBlindingKey::new();
+let gov_id = auth.register_blinded_issuer(...)?;
+
+// Company issuer for employment
+let mut company_issuer = IssuerBlindingKey::new();
+let company_id = auth.register_blinded_issuer(...)?;
+
+// Bank issuer for payment verification
+let mut bank_issuer = IssuerBlindingKey::new();
+let bank_id = auth.register_blinded_issuer(...)?;
+
+// User combines credentials from all three
+let claims = vec![
+    BlindedCapabilityClaim::from_batched_claim(gov_id, age_claim),
+    BlindedCapabilityClaim::from_batched_claim(company_id, role_claim),
+    BlindedCapabilityClaim::from_batched_claim(bank_id, payment_claim),
+];
+
+let capability = create_blinded_capability_token(&mut rng, &mut auth, &claims)?;
+```
+
+## Documentation
+
+See the [docs](./docs/) folder for detailed documentation:
+
+- [Architecture Overview](./docs/architecture.md) - System design and components
+- [Blinded Attributes](./docs/blinded-attributes.md) - Privacy-preserving attribute system
+- [Access Policies](./docs/access-policy.md) - Policy syntax and semantics
+- [API Reference](./docs/api-reference.md) - Complete API documentation
+
+## Building & Testing
+
+```bash
+# Build the project
 cargo build
-```
-The code contains numerous tests that you can run using:
 
-```
+# Run all tests (223 tests)
 cargo test
+
+# Run specific test
+cargo test test_access_control_flow
+
+# Build documentation
+cargo doc --open
 ```
 
-# Acknowledgements:
+## Security Considerations
+
+- **Quantum Resistance**: Uses ML-KEM for key encapsulation
+- **Commitment Binding**: Poseidon2 commitments are computationally binding
+- **Unlinkability**: Same attribute with different authorities produces different commitments
+- **Forward Secrecy**: Session keys are derived using secure KDFs
+
+## Acknowledgements
+
+Colossus builds upon:
+- [CoverCrypt](https://github.com/Cosmian/cover_crypt) - ETSI TS 104 015 implementation
+- [Miden](https://polygon.technology/polygon-miden) - Poseidon2 hash function
+- [Falcon](https://falcon-sign.info/) - Post-quantum signatures for issuer authentication
+
+## License
+
+[Add license information]

@@ -2,17 +2,14 @@ use super::{
     AccessCredential, AliasProof, Attributes, CBORCodec, IssuerError, MaxCardinality, MaxEntries,
     Signature, verify,
 };
-use crate::{
-    dac::{
-        builder::AccessCredentialBuilder,
-        ec::Scalar,
-        keys::{VK, VKCompressed},
-        set_commits::{
-            Commitment, CrossSetCommitment, ParamSetCommitment, ParamSetCommitmentCompressed,
-        },
-        zkp::{DamgardTransform, Nonce},
+use crate::dac::{
+    builder::AccessCredentialBuilder,
+    ec::Scalar,
+    keys::{VK, VKCompressed},
+    set_commits::{
+        Commitment, CrossSetCommitment, ParamSetCommitment, ParamSetCommitmentCompressed,
     },
-    policy::AccessStructure,
+    zkp::{DamgardTransform, Nonce},
 };
 use bls12_381_plus::{
     G1Affine, G1Projective, G2Affine, G2Projective, elliptic_curve::ops::MulByGenerator, ff::Field,
@@ -31,7 +28,6 @@ pub struct Issuer {
 pub struct IssuerPublic {
     pub parameters: ParamSetCommitment,
     pub vk: Vec<VK>,
-    pub access_structure: AccessStructure,
 }
 
 impl CBORCodec for IssuerPublicCompressed {}
@@ -51,7 +47,6 @@ impl IssuerPublic {
 
         IssuerPublicCompressed {
             vk: vk_b64,
-            access_structure: self.access_structure.clone(),
             parameters: self.parameters.clone().into(),
         }
     }
@@ -60,13 +55,15 @@ impl IssuerPublic {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IssuerPublicCompressed {
     pub parameters: ParamSetCommitmentCompressed,
-    pub access_structure: AccessStructure,
     pub vk: Vec<VKCompressed>,
 }
 
-impl ToString for IssuerPublicCompressed {
-    fn to_string(&self) -> String {
-        serde_json::to_string(&self).unwrap()
+impl std::fmt::Display for IssuerPublicCompressed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match serde_json::to_string(&self) {
+            Ok(s) => write!(f, "{s}"),
+            Err(e) => write!(f, "{{\"error\": \"{e}\"}}"),
+        }
     }
 }
 
@@ -74,7 +71,6 @@ impl From<IssuerPublic> for IssuerPublicCompressed {
     fn from(item: IssuerPublic) -> Self {
         Self {
             parameters: item.parameters.into(),
-            access_structure: item.access_structure.clone(),
             vk: item.vk.iter().map(|vk| vk.into()).collect::<Vec<_>>(),
         }
     }
@@ -84,7 +80,6 @@ impl From<&IssuerPublic> for IssuerPublicCompressed {
     fn from(item: &IssuerPublic) -> Self {
         Self {
             parameters: item.parameters.clone().into(),
-            access_structure: item.access_structure.clone(),
             vk: item.vk.iter().map(|vk| vk.into()).collect::<Vec<_>>(),
         }
     }
@@ -100,31 +95,24 @@ impl TryFrom<IssuerPublicCompressed> for IssuerPublic {
             .map(|vk| match vk {
                 VKCompressed::G1(vk_g1) => {
                     let mut bytes = [0u8; G1Affine::COMPRESSED_BYTES];
-                    bytes.copy_from_slice(&vk_g1);
-                    let vk_g1_maybe = G1Affine::from_compressed(&bytes);
-
-                    if vk_g1_maybe.is_none().into() {
-                        return Err(crate::dac::error::Error::InvalidG1Point);
-                    }
-
-                    Ok(VK::G1(G1Projective::from(vk_g1_maybe.unwrap())))
+                    bytes.copy_from_slice(vk_g1);
+                    let vk_g1_affine: Option<G1Affine> = G1Affine::from_compressed(&bytes).into();
+                    vk_g1_affine
+                        .map(|a| VK::G1(G1Projective::from(a)))
+                        .ok_or(crate::dac::error::Error::InvalidG1Point)
                 },
                 VKCompressed::G2(vk_g2) => {
                     let mut bytes = [0u8; G2Affine::COMPRESSED_BYTES];
-                    bytes.copy_from_slice(&vk_g2);
-                    let vk_g2_maybe = G2Affine::from_compressed(&bytes);
-
-                    if vk_g2_maybe.is_none().into() {
-                        return Err(crate::dac::error::Error::InvalidG2Point);
-                    }
-
-                    Ok(VK::G2(G2Projective::from(vk_g2_maybe.unwrap())))
+                    bytes.copy_from_slice(vk_g2);
+                    let vk_g2_affine: Option<G2Affine> = G2Affine::from_compressed(&bytes).into();
+                    vk_g2_affine
+                        .map(|a| VK::G2(G2Projective::from(a)))
+                        .ok_or(crate::dac::error::Error::InvalidG2Point)
                 },
             })
             .collect::<Result<Vec<_>, Self::Error>>()?;
 
         Ok(Self {
-            access_structure: item.access_structure.clone(),
             parameters: item.parameters.try_into()?,
             vk,
         })
@@ -132,32 +120,30 @@ impl TryFrom<IssuerPublicCompressed> for IssuerPublic {
 }
 
 impl Issuer {
-    pub fn setup(t: Option<MaxCardinality>, access_structure: &AccessStructure) -> Self {
+    /// Creates a new issuer with the specified number of attributes.
+    ///
+    /// # Arguments
+    ///
+    /// * `t` - Maximum cardinality for set commitments (None for default)
+    /// * `num_attributes` - Number of attributes this issuer will support
+    pub fn setup(t: Option<MaxCardinality>, num_attributes: usize) -> Self {
         let rng = CsRng::from_entropy();
-        let l_message = MaxEntries(access_structure.no_attributes());
+        let l_message = MaxEntries(num_attributes);
 
         let sk = SecretBox::new(Box::new(
             (0..l_message.0 + 2).map(|_| Scalar::random(rng.clone())).collect::<Vec<_>>(),
         ));
 
-        Self::new_with_secret(sk, t.unwrap_or(MaxCardinality::default()), access_structure)
+        Self::new_with_secret(sk, t.unwrap_or(MaxCardinality::default()))
     }
 
-    pub fn new_with_secret(
-        sk: SecretBox<Vec<Scalar>>,
-        t: MaxCardinality,
-        access_structure: &AccessStructure,
-    ) -> Self {
+    pub fn new_with_secret(sk: SecretBox<Vec<Scalar>>, t: MaxCardinality) -> Self {
         let public_parameters = ParamSetCommitment::new(&t);
 
-        Self::new_with_params(sk, public_parameters, access_structure)
+        Self::new_with_params(sk, public_parameters)
     }
 
-    pub fn new_with_params(
-        sk: SecretBox<Vec<Scalar>>,
-        params: ParamSetCommitment,
-        access_structure: &AccessStructure,
-    ) -> Self {
+    pub fn new_with_params(sk: SecretBox<Vec<Scalar>>, params: ParamSetCommitment) -> Self {
         let mut vk: Vec<VK> = sk
             .expose_secret()
             .iter()
@@ -169,17 +155,14 @@ impl Issuer {
 
         Self {
             sk,
-            public: IssuerPublic {
-                parameters: params,
-                vk,
-                access_structure: access_structure.clone(),
-            },
+            public: IssuerPublic { parameters: params, vk },
         }
     }
 
-    pub fn restruct(&mut self, access_structure: &AccessStructure) {
+    /// Restructures the issuer for a new number of attributes.
+    pub fn restruct(&mut self, num_attributes: usize) {
         let rng = CsRng::from_entropy();
-        let l_message = MaxEntries(access_structure.no_attributes());
+        let l_message = MaxEntries(num_attributes);
 
         let sk = SecretBox::new(Box::new(
             (0..l_message.0 + 2).map(|_| Scalar::random(rng.clone())).collect::<Vec<_>>(),
@@ -196,13 +179,18 @@ impl Issuer {
 
         self.sk = sk;
         self.public.vk = vk;
-        self.public.access_structure = access_structure.clone();
     }
 
     pub fn access_credential<'a>(&'a self) -> AccessCredentialBuilder<'a> {
         AccessCredentialBuilder::new(self)
     }
 
+    /// Issues an access credential to a user after verifying their alias proof.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The alias proof is invalid
+    /// - The signature verification fails
     pub fn issue_access_cred(
         &self,
         attributes: &[Attributes],
@@ -215,12 +203,17 @@ impl Issuer {
         }
 
         let cred = self.sign(&alias_proof.public_key.into(), attributes, k_prime)?;
-        assert!(verify(
+
+        // Verify the credential we just created (sanity check)
+        let is_valid = verify(
             &self.public.vk,
             &alias_proof.public_key.into(),
             &cred.commitment_vector,
-            &cred.sigma
-        ));
+            &cred.sigma,
+        )?;
+
+        debug_assert!(is_valid, "Internal error: newly created credential failed verification");
+
         Ok(cred)
     }
 
@@ -252,6 +245,11 @@ impl Issuer {
 
         let y_rand = Scalar::random(rng);
 
+        // Invert y_rand. While the probability of a random scalar being zero is
+        // astronomically small (1/2^256), we handle it gracefully.
+        let y_rand_inv: Option<Scalar> = y_rand.invert().into();
+        let y_rand_inv = y_rand_inv.ok_or(IssuerError::ScalarInversionFailed)?;
+
         let list_z = commitment_vector
             .iter()
             .enumerate()
@@ -260,7 +258,7 @@ impl Issuer {
 
         let temp_point = list_z.iter().fold(G1Projective::identity(), |acc, x| acc + x);
 
-        let z = y_rand.invert().unwrap() * temp_point;
+        let z = y_rand_inv * temp_point;
 
         let y_g1 = G1Projective::mul_by_generator(&y_rand);
 
@@ -282,7 +280,7 @@ impl Issuer {
                     let mut uk = Vec::new();
                     for i in 0..self.public.parameters.pp_commit_g1.len() {
                         let uk_i = self.public.parameters.pp_commit_g1[i]
-                            * y_rand.invert().unwrap()
+                            * y_rand_inv
                             * self.sk.expose_secret()[k + 1]; // this is `k + 1` because sk[0] and sk[1] are used for t
                         uk.push(uk_i);
                     }

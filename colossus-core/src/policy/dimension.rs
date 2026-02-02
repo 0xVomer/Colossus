@@ -373,34 +373,25 @@ mod serialization {
 
     #[test]
     fn test_dimension_serialization() {
-        use crate::policy::attribute::QualifiedAttribute;
+        use crate::policy::ATTRIBUTE;
         use cosmian_crypto_core::bytes_ser_de::test_serialization;
+
+        // Create test attribute identifiers
+        let attr_a = ATTRIBUTE::from(b"test_attr_a".to_vec());
+        let attr_b = ATTRIBUTE::from(b"test_attr_b".to_vec());
+        let attr_c = ATTRIBUTE::from(b"test_attr_c".to_vec());
 
         let mut d = Dimension::Hierarchy(Dict::new());
 
-        d.add_attribute(QualifiedAttribute::from(("DIM", "A")).bytes(), None, 0)
-            .unwrap();
-        d.add_attribute(
-            QualifiedAttribute::from(("DIM", "B")).bytes(),
-            Some(QualifiedAttribute::from(("DIM", "A")).bytes()),
-            1,
-        )
-        .unwrap();
-        d.add_attribute(
-            QualifiedAttribute::from(("DIM", "C")).bytes(),
-            Some(QualifiedAttribute::from(("DIM", "B")).bytes()),
-            2,
-        )
-        .unwrap();
+        d.add_attribute(attr_a.clone(), None, 0).unwrap();
+        d.add_attribute(attr_b.clone(), Some(attr_a.clone()), 1).unwrap();
+        d.add_attribute(attr_c.clone(), Some(attr_b.clone()), 2).unwrap();
         test_serialization(&d).unwrap();
 
         let mut d = Dimension::Anarchy(HashMap::new());
-        d.add_attribute(QualifiedAttribute::from(("DIM", "A")).bytes(), None, 0)
-            .unwrap();
-        d.add_attribute(QualifiedAttribute::from(("DIM", "B")).bytes(), None, 1)
-            .unwrap();
-        d.add_attribute(QualifiedAttribute::from(("DIM", "C")).bytes(), None, 2)
-            .unwrap();
+        d.add_attribute(attr_a.clone(), None, 0).unwrap();
+        d.add_attribute(attr_b.clone(), None, 1).unwrap();
+        d.add_attribute(attr_c.clone(), None, 2).unwrap();
 
         test_serialization(&d).unwrap();
     }

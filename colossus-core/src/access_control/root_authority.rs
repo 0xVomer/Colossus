@@ -1118,6 +1118,7 @@ mod tests {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::access_control::cryptography::ae_poseidon2::{POSEIDON2_KEY_SIZE, Poseidon2Aead};
     use crate::{
         access_control::{
             AccessControl,
@@ -1129,7 +1130,7 @@ mod test {
         },
         policy::{AccessPolicy, AttributeStatus, Right},
     };
-    use cosmian_crypto_core::{CsRng, XChaCha20Poly1305, reexport::rand_core::SeedableRng};
+    use cosmian_crypto_core::{CsRng, reexport::rand_core::SeedableRng};
     use std::collections::{HashMap, HashSet};
 
     #[test]
@@ -1341,15 +1342,11 @@ mod test {
         let ptx = "testing encryption/decryption".as_bytes();
         let aad = "COLOSSUS-ROOT".as_bytes();
 
-        let ctx = PkeAc::<{ XChaCha20Poly1305::KEY_LENGTH }, XChaCha20Poly1305>::encrypt(
-            &api, &rpk, &ap, ptx, aad,
-        )
-        .expect("cannot encrypt!");
+        let ctx = PkeAc::<POSEIDON2_KEY_SIZE, Poseidon2Aead>::encrypt(&api, &rpk, &ap, ptx, aad)
+            .expect("cannot encrypt!");
         let usk = api.grant_access_right_keys(&mut auth, &ap).expect("cannot generate usk");
-        let ptx1 = PkeAc::<{ XChaCha20Poly1305::KEY_LENGTH }, XChaCha20Poly1305>::decrypt(
-            &api, &usk, &ctx, aad,
-        )
-        .expect("cannot decrypt the ciphertext");
+        let ptx1 = PkeAc::<POSEIDON2_KEY_SIZE, Poseidon2Aead>::decrypt(&api, &usk, &ctx, aad)
+            .expect("cannot decrypt the ciphertext");
         assert_eq!(ptx, &*ptx1.unwrap());
     }
 }

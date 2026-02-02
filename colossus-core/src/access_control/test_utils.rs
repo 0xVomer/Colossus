@@ -1,35 +1,21 @@
+// Test utilities - only used in tests
+#![allow(dead_code)]
+
 use crate::{
     access_control::{AccessControl, CapabilityAuthority, CapabilityAuthorityPublicKey},
-    policy::{AccessStructure, Error},
+    policy::Error,
 };
 
-pub fn gen_structure(policy: &mut AccessStructure, complete: bool) -> Result<(), Error> {
-    policy.add_hierarchy("SEC".to_string())?;
-
-    policy.add_attribute(crate::policy::QualifiedAttribute::from(("SEC", "LOW")), None)?;
-    policy.add_attribute(crate::policy::QualifiedAttribute::from(("SEC", "TOP")), Some("LOW"))?;
-
-    policy.add_anarchy("DPT".to_string())?;
-    ["RD", "HR", "MKG", "FIN", "DEV"].into_iter().try_for_each(|attrib| {
-        policy.add_attribute(crate::policy::QualifiedAttribute::from(("DPT", attrib)), None)
-    })?;
-
-    if complete {
-        policy.add_anarchy("CTR".to_string())?;
-        ["EN", "DE", "IT", "FR", "SP"].into_iter().try_for_each(|attrib| {
-            policy.add_attribute(crate::policy::QualifiedAttribute::from(("CTR", attrib)), None)
-        })?;
-    }
-
-    Ok(())
-}
-
-pub fn gen_auth(
+/// Creates a basic capability authority for testing with blinded mode.
+///
+/// The authority is set up with identity (required for blinded mode) but
+/// without any issuers registered yet. Tests should register blinded issuers
+/// and add dimensions/attributes as needed.
+pub fn gen_blinded_auth(
     api: &AccessControl,
-    complete: bool,
 ) -> Result<(CapabilityAuthority, CapabilityAuthorityPublicKey), Error> {
-    let (mut auth, _) = api.setup_capability_authority()?;
-    gen_structure(&mut auth.access_structure, complete)?;
-    let rpk = api.update_capability_authority(&mut auth)?;
+    let mut auth = api.setup_blinded_authority()?.with_identity();
+    auth.init_blinded_structure()?;
+    let rpk = auth.rpk()?;
     Ok((auth, rpk))
 }

@@ -65,15 +65,10 @@ impl std::convert::TryFrom<ParamSetCommitmentCompressed> for ParamSetCommitment 
             .map(|g1| {
                 let mut bytes = [0u8; G1Affine::COMPRESSED_BYTES];
                 bytes.copy_from_slice(g1);
-                let g1_maybe = G1Affine::from_compressed(&bytes);
-
-                if g1_maybe.is_none().into() {
-                    return Err(Self::Error::InvalidG1Point);
-                }
-                Ok(g1_maybe.expect("it'll be fine, it passed the check"))
+                let g1_affine: Option<G1Affine> = G1Affine::from_compressed(&bytes).into();
+                g1_affine.map(G1Projective::from).ok_or(Self::Error::InvalidG1Point)
             })
-            .map(|item| item.unwrap().into())
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let pp_commit_g2 = param_sc
             .pp_commit_g2
@@ -81,15 +76,10 @@ impl std::convert::TryFrom<ParamSetCommitmentCompressed> for ParamSetCommitment 
             .map(|g2| {
                 let mut bytes = [0u8; G2Affine::COMPRESSED_BYTES];
                 bytes.copy_from_slice(g2);
-                let g2_maybe = G2Affine::from_compressed(&bytes);
-
-                if g2_maybe.is_none().into() {
-                    return Err(Self::Error::InvalidG2Point);
-                }
-                Ok(g2_maybe.expect("it'll be fine, it passed the check"))
+                let g2_affine: Option<G2Affine> = G2Affine::from_compressed(&bytes).into();
+                g2_affine.map(G2Projective::from).ok_or(Self::Error::InvalidG2Point)
             })
-            .map(|item| item.unwrap().into())
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(ParamSetCommitment { pp_commit_g1, pp_commit_g2 })
     }
@@ -365,19 +355,30 @@ pub fn not_intersection(list_s: &[Scalar], list_t: Vec<Scalar>) -> Vec<Scalar> {
 
 #[cfg(test)]
 mod test {
+    use crate::crypto::{Felt, Word};
     use crate::dac::Attributes;
-    use crate::policy::QualifiedAttribute;
+    use crate::policy::BlindedAttribute;
 
     use super::*;
+
+    // Helper to create test BlindedAttributes with deterministic commitments
+    fn test_blinded_attr(id: u64) -> BlindedAttribute {
+        BlindedAttribute::from_commitment(Word::new([
+            Felt::new(id),
+            Felt::new(id + 100),
+            Felt::new(id + 200),
+            Felt::new(id + 300),
+        ]))
+    }
 
     #[test]
     fn test_commit_and_open() {
         let max_cardinal = 5;
 
         let attrib_set: Attributes = Entry(vec![
-            QualifiedAttribute::from(("Age", "Over18")),
-            QualifiedAttribute::from(("Sex", "female")),
-            QualifiedAttribute::from(("License", "Driver")),
+            test_blinded_attr(1), // Age::Over18
+            test_blinded_attr(2), // Sex::female
+            test_blinded_attr(3), // License::Driver
         ]);
 
         let sc = SetCommitment::new(MaxCardinality(max_cardinal));
@@ -390,15 +391,15 @@ mod test {
     fn test_open_verify_subset() {
         let max_cardinal = 5;
 
-        let attrib_set: Attributes = Entry(vec![
-            QualifiedAttribute::from(("Age", "Over18")),
-            QualifiedAttribute::from(("Sex", "female")),
-            QualifiedAttribute::from(("License", "Driver")),
-        ]);
-        let attrib_subset = Entry(vec![
-            QualifiedAttribute::from(("Age", "Over18")),
-            QualifiedAttribute::from(("License", "Driver")),
-        ]);
+        // Full set with 3 attributes
+        let attr1 = test_blinded_attr(1);
+        let attr2 = test_blinded_attr(2);
+        let attr3 = test_blinded_attr(3);
+
+        let attrib_set: Attributes = Entry(vec![attr1.clone(), attr2, attr3.clone()]);
+
+        // Subset with 2 attributes
+        let attrib_subset: Attributes = Entry(vec![attr1, attr3]);
 
         let sc = SetCommitment::new(MaxCardinality(max_cardinal));
         let (commitment, opening_info) = SetCommitment::commit_set(&sc.param_sc, &attrib_set);
@@ -419,17 +420,19 @@ mod test {
 
     #[test]
     fn test_aggregate_verify_cross() {
-        let attrib_set_a: Attributes = Entry(vec![
-            QualifiedAttribute::from(("AGE", "OVER18")),
-            QualifiedAttribute::from(("GENDER", "FEM")),
-            QualifiedAttribute::from(("LICENSE", "DRIVER")),
-        ]);
+        let attr_a1 = test_blinded_attr(10);
+        let attr_a2 = test_blinded_attr(11);
+        let attr_a3 = test_blinded_attr(12);
 
-        let attrib_set_b: Attributes = Entry(vec![
-            QualifiedAttribute::from(("DRIVER", "TYPEB")),
-            QualifiedAttribute::from(("COMPANY", "ACME")),
-            QualifiedAttribute::from(("ROLE", "DELIVERY")),
-        ]);
+        let attr_b1 = test_blinded_attr(20);
+        let attr_b2 = test_blinded_attr(21);
+        let attr_b3 = test_blinded_attr(22);
+
+        let attrib_set_a: Attributes =
+            Entry(vec![attr_a1.clone(), attr_a2.clone(), attr_a3.clone()]);
+
+        let attrib_set_b: Attributes =
+            Entry(vec![attr_b1.clone(), attr_b2.clone(), attr_b3.clone()]);
 
         let max_cardinal = 5;
 
@@ -441,15 +444,8 @@ mod test {
 
         let commit_vector = &vec![commitment_1, commitment_2];
 
-        let attrib_subset_1 = Entry(vec![
-            QualifiedAttribute::from(("AGE", "OVER18")),
-            QualifiedAttribute::from(("GENDER", "FEM")),
-            QualifiedAttribute::from(("LICENSE", "DRIVER")),
-        ]);
-        let attrib_subset_2 = Entry(vec![
-            QualifiedAttribute::from(("DRIVER", "TYPEB")),
-            QualifiedAttribute::from(("COMPANY", "ACME")),
-        ]);
+        let attrib_subset_1: Attributes = Entry(vec![attr_a1, attr_a2, attr_a3]);
+        let attrib_subset_2: Attributes = Entry(vec![attr_b1, attr_b2]);
 
         let witness_1 = CrossSetCommitment::open_subset(
             &csc.param_sc,

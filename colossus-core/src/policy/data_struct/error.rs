@@ -1,27 +1,26 @@
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
+use thiserror::Error;
 
 type Key = String;
 
-#[derive(Debug)]
+/// Errors that can occur in data structure operations.
+#[derive(Error, Debug)]
 pub enum Error {
+    /// The entry with the given key was not found
+    #[error("entry not found with key: {0}")]
     EntryNotFound(Key),
+
+    /// An entry with the given key already exists
+    #[error("entry already exists with key: {0}")]
     ExistingEntry(Key),
+
+    /// The entry already has a child node
+    #[error("entry with key '{0}' already has a child")]
     AlreadyHasChild(Key),
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self {
-            Self::EntryNotFound(key) => write!(f, "Entry not found with key: {key}."),
-            Self::ExistingEntry(key) => write!(f, "Already existing entry with key: {key}."),
-            Self::AlreadyHasChild(key) => {
-                write!(f, "Entry with key {key} already has a child.")
-            }
-        }
-    }
-}
-
 impl Error {
+    /// Create an EntryNotFound error from any Debug type
     pub fn missing_entry<T>(key: &T) -> Self
     where
         T: Debug,
@@ -29,6 +28,7 @@ impl Error {
         Self::EntryNotFound(format!("{key:?}"))
     }
 
+    /// Create an ExistingEntry error from any Debug type
     pub fn existing_entry<T>(key: &T) -> Self
     where
         T: Debug,
@@ -36,6 +36,7 @@ impl Error {
         Self::ExistingEntry(format!("{key:?}"))
     }
 
+    /// Create an AlreadyHasChild error from any Debug type
     pub fn already_has_child<T>(key: &T) -> Self
     where
         T: Debug,

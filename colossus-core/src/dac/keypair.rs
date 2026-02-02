@@ -85,42 +85,74 @@ impl MaxCardinality {
     }
 }
 
+/// Verifies a signature against a verification key and commitment vector.
+///
+/// Returns `Ok(true)` if the signature is valid, `Ok(false)` if invalid,
+/// or `Err` if the verification key structure is malformed.
+#[must_use]
 pub fn verify(
     vk: &[VK],
     pk_u: &G1Projective,
     commitment_vector: &[G1Projective],
     sigma: &Signature,
-) -> bool {
+) -> Result<bool, IssuerError> {
     let g_1 = &G1Projective::GENERATOR;
     let g_2 = &G2Projective::GENERATOR;
     let Signature { z, y_g1, y_hat, t } = sigma;
+
+    // Validate verification key has minimum required elements
+    if vk.len() < 3 {
+        return Err(IssuerError::InvalidVerificationKey(
+            "verification key must have at least 3 elements".to_string(),
+        ));
+    }
 
     let pairing_op = commitment_vector
         .iter()
         .zip(vk.iter().skip(3))
         .map(|(c, vkj3)| {
             if let VK::G2(vkj3) = vkj3 {
-                pairing(c, vkj3)
+                Ok(pairing(c, vkj3))
             } else {
-                panic!("Invalid verification key");
+                Err(IssuerError::InvalidVerificationKey(
+                    "expected G2 element in verification key".to_string(),
+                ))
             }
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
 
-    if let VK::G2(vk2) = &vk[2] {
-        if let VK::G2(vk1) = &vk[1] {
-            let a = pairing(y_g1, g_2) == pairing(g_1, y_hat);
-            let b = pairing(t, g_2) == pairing(y_g1, vk2) * pairing(pk_u, vk1);
-            let c = pairing(z, y_hat) == pairing_op.iter().fold(Gt::IDENTITY, Gt::mul);
-            a && b && c
-        } else {
-            panic!("Invalid verification key");
-        }
-    } else {
-        panic!("Invalid verification key");
-    }
+    let vk2 = match &vk[2] {
+        VK::G2(v) => v,
+        _ => {
+            return Err(IssuerError::InvalidVerificationKey(
+                "vk[2] must be a G2 element".to_string(),
+            ));
+        },
+    };
+
+    let vk1 = match &vk[1] {
+        VK::G2(v) => v,
+        _ => {
+            return Err(IssuerError::InvalidVerificationKey(
+                "vk[1] must be a G2 element".to_string(),
+            ));
+        },
+    };
+
+    let a = pairing(y_g1, g_2) == pairing(g_1, y_hat);
+    let b = pairing(t, g_2) == pairing(y_g1, vk2) * pairing(pk_u, vk1);
+    let c = pairing(z, y_hat) == pairing_op.iter().fold(Gt::IDENTITY, Gt::mul);
+
+    Ok(a && b && c)
 }
 
+/// Verifies a credential proof against an issuer's public parameters.
+///
+/// Returns `true` if all verification checks pass:
+/// - Cross-set commitment verification
+/// - Zero-knowledge proof verification
+/// - Signature verification
+#[must_use]
 pub fn verify_proof(
     issuer_public: &IssuerPublic,
     proof: &CredProof,
@@ -144,12 +176,15 @@ pub fn verify_proof(
 
     let check_zkp_verify = DamgardTransform::verify(&proof.alias_proof, nonce);
 
-    let verify_sig = verify(
+    let verify_sig = match verify(
         &issuer_public.vk,
         &proof.alias_proof.public_key.into(),
         &proof.commitment_vector.iter().map(|c| c.into()).collect::<Vec<_>>(),
         &proof.sigma,
-    );
+    ) {
+        Ok(valid) => valid,
+        Err(_) => false,
+    };
 
     check_verify_cross && check_zkp_verify && verify_sig
 }

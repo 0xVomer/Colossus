@@ -1,4 +1,5 @@
 #![allow(clippy::vec_init_then_push)]
+#![allow(unused_parens)] // Inner product uses parens for clarity
 use super::Scalar;
 use bls12_381_plus::ff::Field;
 use cosmian_crypto_core::reexport::rand_core::OsRng;
@@ -239,7 +240,7 @@ impl ScalarVector {
         (Self::from(l), Self::from(r))
     }
 
-    pub fn iter(&self) -> Iter<Scalar> {
+    pub fn iter(&self) -> Iter<'_, Scalar> {
         self.as_slice().iter()
     }
 }
